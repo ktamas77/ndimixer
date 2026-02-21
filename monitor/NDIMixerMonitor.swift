@@ -59,6 +59,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Track menu structure: overlay count per channel
     var lastMenuSignature: [Int] = []
 
+    // FPS tracking: previous frame counts and poll timestamp
+    var lastFrameCounts: [UInt64] = []
+    var lastPollTime: Date?
+
     init(url: URL) {
         self.statusURL = url
         super.init()
@@ -259,8 +263,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             items.outputItem.title = "  Output: \(ch.output_name) \(ch.resolution)@\(ch.frame_rate)"
-            items.framesItem.title = "  Frames: \(formatNumber(ch.frames_output))"
+
+            // Calculate FPS from frame count delta
+            var fpsStr = ""
+            if let prevTime = lastPollTime, i < lastFrameCounts.count {
+                let dt = Date().timeIntervalSince(prevTime)
+                if dt > 0.1 {
+                    let delta = ch.frames_output >= lastFrameCounts[i]
+                        ? ch.frames_output - lastFrameCounts[i] : 0
+                    let fps = Double(delta) / dt
+                    fpsStr = " (\(String(format: "%.1f", fps)) fps)"
+                }
+            }
+            items.framesItem.title = "  Frames: \(formatNumber(ch.frames_output))\(fpsStr)"
         }
+
+        // Store frame counts and timestamp for next FPS calculation
+        lastFrameCounts = status.channels.map { $0.frames_output }
+        lastPollTime = Date()
     }
 
     func showOffline() {
