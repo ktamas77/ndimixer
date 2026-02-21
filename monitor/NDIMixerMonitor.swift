@@ -30,12 +30,31 @@ struct BrowserOverlayStatus: Codable {
     let loaded: Bool
 }
 
+// MARK: - Per-channel menu item references for live updates
+
+struct ChannelMenuItems {
+    let nameItem: NSMenuItem
+    let ndiItem: NSMenuItem
+    let browserItem: NSMenuItem
+    let outputItem: NSMenuItem
+    let framesItem: NSMenuItem
+}
+
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var timer: Timer?
     var statusURL: URL
+
+    // Persistent menu + item references for in-place updates
+    var menu = NSMenu()
+    var headerItem: NSMenuItem!
+    var offlineItem: NSMenuItem!
+    var channelItems: [ChannelMenuItems] = []
+    var quitItem: NSMenuItem!
+    var lastChannelCount: Int = -1
+    var isOnline = false
 
     init(url: URL) {
         self.statusURL = url
@@ -44,7 +63,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.menu = menu
         setDisconnected()
+        buildInitialMenu()
         pollStatus()
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.pollStatus()
@@ -67,6 +88,93 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.attributedTitle = NSAttributedString(string: "NDI", attributes: attrs)
     }
 
+    func buildInitialMenu() {
+        menu.removeAllItems()
+
+        headerItem = NSMenuItem(title: "NDI Mixer: connecting...", action: nil, keyEquivalent: "")
+        headerItem.isEnabled = false
+        menu.addItem(headerItem)
+
+        offlineItem = NSMenuItem(title: "NDI Mixer: not running", action: nil, keyEquivalent: "")
+        offlineItem.isEnabled = false
+        offlineItem.isHidden = true
+        menu.addItem(offlineItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        channelItems = []
+        lastChannelCount = -1
+    }
+
+    func rebuildChannelItems(count: Int) {
+        // Remove old channel items (between separator and quit)
+        for items in channelItems {
+            menu.removeItem(items.nameItem)
+            menu.removeItem(items.ndiItem)
+            menu.removeItem(items.browserItem)
+            menu.removeItem(items.outputItem)
+            menu.removeItem(items.framesItem)
+        }
+        // Remove old separators between channels
+        while let sepIdx = findChannelSeparatorIndex() {
+            menu.removeItem(at: sepIdx)
+        }
+
+        channelItems = []
+        let insertIdx = menu.index(of: quitItem)
+
+        for i in 0..<count {
+            let offset = insertIdx + i * 6 // 5 items + 1 separator per channel
+
+            let nameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            nameItem.isEnabled = false
+            menu.insertItem(nameItem, at: offset)
+
+            let ndiItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            ndiItem.isEnabled = false
+            menu.insertItem(ndiItem, at: offset + 1)
+
+            let browserItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            browserItem.isEnabled = false
+            menu.insertItem(browserItem, at: offset + 2)
+
+            let outputItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            outputItem.isEnabled = false
+            menu.insertItem(outputItem, at: offset + 3)
+
+            let framesItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            framesItem.isEnabled = false
+            menu.insertItem(framesItem, at: offset + 4)
+
+            let sep = NSMenuItem.separator()
+            sep.tag = 999 // tag to identify channel separators
+            menu.insertItem(sep, at: offset + 5)
+
+            channelItems.append(ChannelMenuItems(
+                nameItem: nameItem,
+                ndiItem: ndiItem,
+                browserItem: browserItem,
+                outputItem: outputItem,
+                framesItem: framesItem
+            ))
+        }
+
+        lastChannelCount = count
+    }
+
+    func findChannelSeparatorIndex() -> Int? {
+        for i in 0..<menu.items.count {
+            if menu.items[i].tag == 999 {
+                return i
+            }
+        }
+        return nil
+    }
+
     func pollStatus() {
         let task = URLSession.shared.dataTask(with: statusURL) { [weak self] data, _, error in
             DispatchQueue.main.async {
@@ -75,14 +183,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                    let status = try? JSONDecoder().decode(StatusResponse.self, from: data)
                 {
                     self.setConnected()
-                    self.buildMenu(from: status)
+                    self.updateMenu(from: status)
                 } else {
                     self.setDisconnected()
-                    self.buildOfflineMenu()
+                    self.showOffline()
                 }
             }
         }
         task.resume()
+    }
+
+    func updateMenu(from status: StatusResponse) {
+        isOnline = true
+        headerItem.title = "NDI Mixer v\(status.version) — \(formatUptime(status.uptime_seconds))"
+        headerItem.isHidden = false
+        offlineItem.isHidden = true
+
+        // Rebuild channel structure if count changed
+        if status.channels.count != lastChannelCount {
+            rebuildChannelItems(count: status.channels.count)
+        }
+
+        // Update each channel's items in place
+        for (i, ch) in status.channels.enumerated() {
+            guard i < channelItems.count else { break }
+            let items = channelItems[i]
+
+            let boldAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            ]
+            items.nameItem.attributedTitle = NSAttributedString(
+                string: "\u{25CF} \(ch.name)", attributes: boldAttrs)
+
+            if let ndi = ch.ndi_input {
+                let symbol = ndi.connected ? "\u{2713}" : "\u{2717}"
+                items.ndiItem.title = "  NDI: \(symbol) \(ndi.source)"
+            } else {
+                items.ndiItem.title = "  NDI: \u{2014}"
+            }
+
+            if let browser = ch.browser_overlay {
+                let symbol = browser.loaded ? "\u{2713}" : "\u{2717}"
+                items.browserItem.title = "  Browser: \(symbol) loaded"
+            } else {
+                items.browserItem.title = "  Browser: \u{2014}"
+            }
+
+            items.outputItem.title = "  Output: \(ch.output_name) \(ch.resolution)@\(ch.frame_rate)"
+            items.framesItem.title = "  Frames: \(formatNumber(ch.frames_output))"
+        }
+    }
+
+    func showOffline() {
+        isOnline = false
+        headerItem.isHidden = true
+        offlineItem.isHidden = false
+
+        // Clear channel items
+        if lastChannelCount != 0 {
+            rebuildChannelItems(count: 0)
+        }
     }
 
     func formatUptime(_ seconds: UInt64) -> String {
@@ -99,93 +259,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
-    }
-
-    func buildMenu(from status: StatusResponse) {
-        let menu = NSMenu()
-
-        let header = NSMenuItem(
-            title: "NDI Mixer v\(status.version) — \(formatUptime(status.uptime_seconds))",
-            action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-        menu.addItem(NSMenuItem.separator())
-
-        for ch in status.channels {
-            // Channel name header
-            let chItem = NSMenuItem(title: "\u{25CF} \(ch.name)", action: nil, keyEquivalent: "")
-            chItem.isEnabled = false
-            let chAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-            ]
-            chItem.attributedTitle = NSAttributedString(string: "\u{25CF} \(ch.name)", attributes: chAttrs)
-            menu.addItem(chItem)
-
-            // NDI input
-            if let ndi = ch.ndi_input {
-                let symbol = ndi.connected ? "\u{2713}" : "\u{2717}"
-                let ndiItem = NSMenuItem(
-                    title: "  NDI: \(symbol) \(ndi.source)", action: nil, keyEquivalent: "")
-                ndiItem.isEnabled = false
-                menu.addItem(ndiItem)
-            } else {
-                let ndiItem = NSMenuItem(title: "  NDI: —", action: nil, keyEquivalent: "")
-                ndiItem.isEnabled = false
-                menu.addItem(ndiItem)
-            }
-
-            // Browser overlay
-            if let browser = ch.browser_overlay {
-                let symbol = browser.loaded ? "\u{2713}" : "\u{2717}"
-                let bItem = NSMenuItem(
-                    title: "  Browser: \(symbol) loaded", action: nil, keyEquivalent: "")
-                bItem.isEnabled = false
-                menu.addItem(bItem)
-            } else {
-                let bItem = NSMenuItem(title: "  Browser: —", action: nil, keyEquivalent: "")
-                bItem.isEnabled = false
-                menu.addItem(bItem)
-            }
-
-            // Output
-            let outItem = NSMenuItem(
-                title: "  Output: \(ch.output_name) \(ch.resolution)@\(ch.frame_rate)",
-                action: nil, keyEquivalent: "")
-            outItem.isEnabled = false
-            menu.addItem(outItem)
-
-            // Frames
-            let framesItem = NSMenuItem(
-                title: "  Frames: \(formatNumber(ch.frames_output))",
-                action: nil, keyEquivalent: "")
-            framesItem.isEnabled = false
-            menu.addItem(framesItem)
-
-            menu.addItem(NSMenuItem.separator())
-        }
-
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
-
-        statusItem.menu = menu
-    }
-
-    func buildOfflineMenu() {
-        let menu = NSMenu()
-
-        let offlineItem = NSMenuItem(
-            title: "NDI Mixer: not running", action: nil, keyEquivalent: "")
-        offlineItem.isEnabled = false
-        menu.addItem(offlineItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
-
-        statusItem.menu = menu
     }
 
     @objc func quit() {
@@ -209,7 +282,7 @@ guard let url = URL(string: urlString) else {
 }
 
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory) // No dock icon
+app.setActivationPolicy(.accessory)
 let delegate = AppDelegate(url: url)
 app.delegate = delegate
 app.run()
