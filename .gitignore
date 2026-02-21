@@ -17,3 +17,6 @@
 
 # Environment
 .env
+
+# Local config (use config.example.toml as template)
+config.toml

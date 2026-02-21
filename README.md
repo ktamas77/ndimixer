@@ -61,6 +61,12 @@ OBS throttles rendering on non-active scenes/mixes. If you need multiple simulta
 
 ## Configuration
 
+Copy the example config and edit it for your setup:
+
+```bash
+cp config.example.toml config.toml
+```
+
 NDI Mixer is configured via a single `config.toml` file.
 
 ### Example
