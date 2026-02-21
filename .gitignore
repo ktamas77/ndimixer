@@ -23,3 +23,6 @@ config.toml
 
 # Monitor binary
 monitor/NDIMixerMonitor
+
+# Local docs
+docs/
