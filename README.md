@@ -443,6 +443,7 @@ The `KeepAlive` option ensures ndimixer automatically restarts if it crashes.
 - [x] Precise frame timing (macOS timer coalescing workaround)
 - [x] Per-layer GPU shader filters (OBS ShaderFilter-inspired)
 - [ ] Hot-reload config (SIGHUP or file watch)
+- [ ] REST API for runtime control (filters, overlays, params, opacity, etc.)
 - [ ] Audio passthrough from NDI input
 - [ ] Multiple NDI inputs per channel
 
