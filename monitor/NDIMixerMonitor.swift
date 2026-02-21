@@ -67,9 +67,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setDisconnected()
         buildInitialMenu()
         pollStatus()
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.pollStatus()
         }
+        // Add to .common modes so the timer fires while the menu is open
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func setConnected() {
