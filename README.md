@@ -176,7 +176,7 @@ frame_rate = 30
 
 ## Prerequisites
 
-- **NDI 6 SDK** — runtime library (`libndi`) required
+- **NDI SDK for Apple** — both the runtime library (`libndi.dylib`) and the SDK development headers are required for building. Included in the free [NDI SDK](https://ndi.video/for-developers/ndi-sdk/download/) download (requires registration).
 - **Rust toolchain** — for building from source
 - **Google Chrome or Chromium** — required for HTML overlay rendering
 
@@ -188,25 +188,28 @@ frame_rate = 30
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-### 2. Install NDI Tools (includes NDI runtime)
+### 2. Install NDI SDK
 
-Download and install from [ndi.video](https://ndi.video/for-developers/ndi-sdk/download/), or use the direct installer:
+NDI Mixer requires both the NDI runtime library and the SDK development headers to compile.
 
-```bash
-open https://downloads.ndi.tv/Tools/NDIToolsInstaller.pkg
-```
+1. Go to the [NDI SDK download page](https://ndi.video/for-developers/ndi-sdk/download/) (free registration required)
+2. Download **NDI SDK for Apple**
+3. Run the installer — it installs to `/Library/NDI SDK for Apple/`
 
-If you get `libndi.dylib` errors after install, fix permissions and re-run the installer:
+This provides both the headers (needed to build) and the runtime library `libndi.dylib`.
+
+If `libndi.dylib` is not present in `/usr/local/lib/` after installation, fix permissions and re-run the installer:
 
 ```bash
 sudo mkdir -p /usr/local/lib
 sudo chmod 755 /usr/local/lib
 ```
 
-Verify the library is installed:
+Verify:
 
 ```bash
 ls /usr/local/lib/libndi.dylib
+ls "/Library/NDI SDK for Apple/include/Processing.NDI.Lib.h"
 ```
 
 ### 3. Install Chrome
@@ -333,6 +336,66 @@ open ./monitor/NDIMixerMonitor
 ### How it works
 
 The monitor polls the ndimixer HTTP status endpoint (`/status`) every 2 seconds. When ndimixer is running, the dropdown shows version, uptime, and per-channel status. When ndimixer is not running or unreachable, the label turns gray and the dropdown shows "NDI Mixer: not running". No configuration file needed.
+
+## Running as a Daemon (macOS)
+
+You can run ndimixer as a background daemon using `launchd`, so it stays running without a terminal window.
+
+### Install the Launch Agent
+
+Create `~/Library/LaunchAgents/com.squidcode.ndimixer.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.squidcode.ndimixer</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/ndimixer/target/release/ndimixer</string>
+        <string>--config</string>
+        <string>/path/to/ndimixer/config.toml</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>DYLD_LIBRARY_PATH</key>
+        <string>/usr/local/lib</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>/path/to/ndimixer</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/ndimixer.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/ndimixer.log</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
+```
+
+Replace `/path/to/ndimixer` with your actual install path. Set `RunAtLoad` to `true` if you want ndimixer to start automatically at login.
+
+### Daemon Controls
+
+```bash
+# Start the daemon
+launchctl load ~/Library/LaunchAgents/com.squidcode.ndimixer.plist
+
+# Stop the daemon
+launchctl unload ~/Library/LaunchAgents/com.squidcode.ndimixer.plist
+
+# Check status
+launchctl list | grep ndimixer
+
+# View logs
+tail -f /tmp/ndimixer.log
+```
+
+The `KeepAlive` option ensures ndimixer automatically restarts if it crashes.
 
 ## Roadmap
 
