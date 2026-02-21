@@ -110,12 +110,24 @@ async fn main() -> anyhow::Result<()> {
     let channel_states: Vec<Arc<ChannelState>> =
         channels.iter().map(|ch| ch.state.clone()).collect();
 
+    // Determine compositor mode label
+    let compositor_mode: &str;
+    #[cfg(feature = "gpu")]
+    {
+        compositor_mode = if gpu_ctx.is_some() { "gpu" } else { "cpu" };
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        compositor_mode = "cpu";
+    }
+
     // Start HTTP status endpoint if configured
     let status_port = config.settings.status_port;
     if status_port > 0 {
         let states_for_http = channel_states.clone();
+        let compositor_str = compositor_mode.to_string();
         tokio::spawn(async move {
-            if let Err(e) = status::serve_http(states_for_http, status_port).await {
+            if let Err(e) = status::serve_http(states_for_http, &compositor_str, status_port).await {
                 tracing::error!("Status HTTP server error: {}", e);
             }
         });
@@ -135,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
         if cancel.is_cancelled() {
             break;
         }
-        print_terminal_status(&channel_states);
+        print_terminal_status(&channel_states, compositor_mode);
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
@@ -143,13 +155,14 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_terminal_status(channels: &[Arc<ChannelState>]) {
+fn print_terminal_status(channels: &[Arc<ChannelState>], compositor: &str) {
     print!("\x1b[2J\x1b[H"); // Clear screen, cursor to top
     println!(
-        "NDI Mixer v{} — {} channel{} active\n",
+        "NDI Mixer v{} — {} channel{} active ({})\n",
         env!("CARGO_PKG_VERSION"),
         channels.len(),
-        if channels.len() == 1 { "" } else { "s" }
+        if channels.len() == 1 { "" } else { "s" },
+        compositor.to_uppercase()
     );
 
     for ch in channels {

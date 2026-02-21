@@ -8,6 +8,7 @@ use crate::channel::ChannelState;
 #[derive(Serialize)]
 struct StatusResponse {
     version: String,
+    compositor: String,
     uptime_seconds: u64,
     channels: Vec<ChannelStatusJson>,
 }
@@ -38,14 +39,16 @@ struct BrowserOverlayStatus {
 
 struct AppState {
     channels: Vec<Arc<ChannelState>>,
+    compositor: String,
     start_time: Instant,
 }
 
 /// Start the HTTP status endpoint on the given port.
 /// `channel_states` must be Arc-wrapped so they can be shared with the HTTP handler.
-pub async fn serve_http(channel_states: Vec<Arc<ChannelState>>, port: u16) -> anyhow::Result<()> {
+pub async fn serve_http(channel_states: Vec<Arc<ChannelState>>, compositor: &str, port: u16) -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         channels: channel_states,
+        compositor: compositor.to_string(),
         start_time: Instant::now(),
     });
 
@@ -94,6 +97,7 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRespon
 
     Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
+        compositor: state.compositor.clone(),
         uptime_seconds: state.start_time.elapsed().as_secs(),
         channels,
     })

@@ -273,7 +273,7 @@ export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
 When running, NDI Mixer displays a live status in the terminal:
 
 ```
-NDI Mixer v0.1.0 — 2 channels active
+NDI Mixer v0.2.0 — 2 channels active (GPU)
 
   Main         NDI: ✓ MY-PC (Camera)  |  Browser: ✓ loaded  |  Output: Mixer-Main (1920x1080@30)
   Clean Feed   NDI: ✓ MY-PC (Camera)  |  Browser: —         |  Output: Mixer-Clean (1920x1080@30)
@@ -291,7 +291,8 @@ curl http://localhost:9100/status
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "compositor": "gpu",
   "uptime_seconds": 3421,
   "channels": [
     {
@@ -331,6 +332,7 @@ A lightweight native macOS menu bar app that shows NDI Mixer status at a glance.
 - **Green/gray NDI label** in the menu bar — green when ndimixer is running, gray when offline
 - **Live-updating dropdown** — frame counts, uptime, and connection status update every 2 seconds, even while the menu is open
 - **Per-channel details** — NDI input source and connection state, browser overlay status, output name/resolution, frame count
+- **Compositor mode** — shows GPU or CPU compositing mode in the header
 - **Independent operation** — launch before or after ndimixer; automatically detects when the mixer starts or stops
 - **Configurable endpoint** — connect to a remote ndimixer instance via `--url`
 

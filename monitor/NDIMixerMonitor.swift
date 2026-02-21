@@ -5,6 +5,7 @@ import Foundation
 
 struct StatusResponse: Codable {
     let version: String
+    let compositor: String?
     let uptime_seconds: UInt64
     let channels: [ChannelStatus]
 }
@@ -198,7 +199,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func updateMenu(from status: StatusResponse) {
         isOnline = true
-        headerItem.title = "NDI Mixer v\(status.version) — \(formatUptime(status.uptime_seconds))"
+        let comp = status.compositor?.uppercased() ?? "CPU"
+        headerItem.title = "NDI Mixer v\(status.version) — \(formatUptime(status.uptime_seconds)) (\(comp))"
         headerItem.isHidden = false
         offlineItem.isHidden = true
 
