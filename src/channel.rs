@@ -18,6 +18,12 @@ fn take_frame(lock: &Mutex<Option<RgbaImage>>) -> Option<RgbaImage> {
     lock.lock().unwrap().take()
 }
 
+/// Per-overlay status info for reporting.
+pub struct BrowserOverlayState {
+    pub url: String,
+    pub loaded: Arc<Mutex<bool>>,
+}
+
 /// Runtime state for a single channel, used for status reporting.
 pub struct ChannelState {
     pub name: String,
@@ -28,8 +34,7 @@ pub struct ChannelState {
     pub ndi_connected: Arc<Mutex<bool>>,
     pub ndi_frames_received: Arc<Mutex<u64>>,
     pub ndi_source: Option<String>,
-    pub browser_loaded: Arc<Mutex<bool>>,
-    pub browser_url: Option<String>,
+    pub browser_overlays: Vec<BrowserOverlayState>,
     pub frames_output: Arc<Mutex<u64>>,
 }
 
@@ -57,10 +62,12 @@ impl Channel {
             None
         };
 
-        // Start browser overlay if configured
-        let browser_overlay = if let Some(ref browser_cfg) = config.browser_overlay {
+        // Start browser overlays
+        let overlay_configs = config.all_browser_overlays();
+        let mut browser_overlays = Vec::with_capacity(overlay_configs.len());
+        for browser_cfg in &overlay_configs {
             let b = browser.ok_or_else(|| anyhow::anyhow!("Browser not available for overlay"))?;
-            Some(
+            browser_overlays.push(
                 BrowserOverlay::start(
                     b,
                     &browser_cfg.url,
@@ -71,10 +78,8 @@ impl Channel {
                     cancel.clone(),
                 )
                 .await?,
-            )
-        } else {
-            None
-        };
+            );
+        }
 
         // Create NDI output
         let ndi_output = NdiOutput::new(ndi, &config.output_name, width, height, frame_rate)?;
@@ -88,11 +93,16 @@ impl Channel {
             .as_ref()
             .map(|i| i.frames_received.clone())
             .unwrap_or_else(|| Arc::new(Mutex::new(0)));
-        let browser_loaded = browser_overlay
-            .as_ref()
-            .map(|b| b.loaded.clone())
-            .unwrap_or_else(|| Arc::new(Mutex::new(false)));
         let frames_output: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
+
+        let browser_overlay_states: Vec<BrowserOverlayState> = overlay_configs
+            .iter()
+            .zip(browser_overlays.iter())
+            .map(|(cfg, overlay)| BrowserOverlayState {
+                url: cfg.url.clone(),
+                loaded: overlay.loaded.clone(),
+            })
+            .collect();
 
         let state = ChannelState {
             name: config.name.clone(),
@@ -103,27 +113,24 @@ impl Channel {
             ndi_connected: ndi_connected.clone(),
             ndi_frames_received: ndi_frames_received.clone(),
             ndi_source: config.ndi_input.as_ref().map(|c| c.source.clone()),
-            browser_loaded: browser_loaded.clone(),
-            browser_url: config.browser_overlay.as_ref().map(|c| c.url.clone()),
+            browser_overlays: browser_overlay_states,
             frames_output: frames_output.clone(),
         };
 
         // Layer z-index and opacity config
         let ndi_z = config.ndi_input.as_ref().map(|c| c.z_index).unwrap_or(0);
         let ndi_opacity = config.ndi_input.as_ref().map(|c| c.opacity).unwrap_or(1.0);
-        let browser_z = config
-            .browser_overlay
-            .as_ref()
-            .map(|c| c.z_index)
-            .unwrap_or(1);
-        let browser_opacity = config
-            .browser_overlay
-            .as_ref()
-            .map(|c| c.opacity)
-            .unwrap_or(1.0);
+
+        // Collect browser overlay render info: (latest_frame_ref, opacity, z_index)
+        let browser_layers: Vec<(Arc<Mutex<Option<RgbaImage>>>, f32, i32)> = overlay_configs
+            .iter()
+            .zip(browser_overlays.iter())
+            .map(|(cfg, overlay)| {
+                (overlay.latest_frame.clone(), cfg.opacity, cfg.z_index)
+            })
+            .collect();
 
         let ndi_latest = ndi_input.as_ref().map(|i| i.latest_frame.clone());
-        let browser_latest = browser_overlay.as_ref().map(|b| b.latest_frame.clone());
 
         let channel_name = config.name.clone();
         let cancel_clone = cancel.clone();
@@ -143,12 +150,13 @@ impl Channel {
             // Reusable canvas — allocated once, cleared each frame by compositor
             let mut canvas: RgbaImage =
                 ImageBuffer::from_pixel(width, height, Rgba([0, 0, 0, 255]));
-            let mut layers = Vec::with_capacity(2);
+            let num_browser = browser_layers.len();
+            let mut layers = Vec::with_capacity(1 + num_browser);
             let mut ndi_output = ndi_output;
 
             // Keep last frames so we always have something to composite
             let mut last_ndi_frame: Option<RgbaImage> = None;
-            let mut last_browser_frame: Option<RgbaImage> = None;
+            let mut last_browser_frames: Vec<Option<RgbaImage>> = vec![None; num_browser];
 
             loop {
                 tokio::select! {
@@ -170,18 +178,18 @@ impl Channel {
                             });
                         }
 
-                        // Take new browser frame if available, keep last if not
-                        if let Some(ref frame_lock) = browser_latest {
+                        // Take new browser frames if available, keep last if not
+                        for (i, (ref frame_lock, opacity, z_index)) in browser_layers.iter().enumerate() {
                             if let Some(img) = take_frame(frame_lock) {
-                                last_browser_frame = Some(img);
+                                last_browser_frames[i] = Some(img);
                             }
-                        }
-                        if let Some(ref img) = last_browser_frame {
-                            layers.push(Layer {
-                                image: img.clone(),
-                                opacity: browser_opacity,
-                                z_index: browser_z,
-                            });
+                            if let Some(ref img) = last_browser_frames[i] {
+                                layers.push(Layer {
+                                    image: img.clone(),
+                                    opacity: *opacity,
+                                    z_index: *z_index,
+                                });
+                            }
                         }
 
                         if layers.is_empty() {

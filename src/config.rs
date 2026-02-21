@@ -39,7 +39,24 @@ pub struct ChannelConfig {
     #[serde(default = "default_frame_rate")]
     pub frame_rate: u32,
     pub ndi_input: Option<NdiInputConfig>,
-    pub browser_overlay: Option<BrowserOverlayConfig>,
+    /// Legacy single overlay (backwards compat with `[channel.browser_overlay]`)
+    #[serde(default)]
+    browser_overlay: Option<BrowserOverlayConfig>,
+    /// Multiple overlays (`[[channel.browser_overlays]]`)
+    #[serde(default)]
+    browser_overlays: Vec<BrowserOverlayConfig>,
+}
+
+impl ChannelConfig {
+    /// Returns all browser overlays, merging legacy single `browser_overlay` with `browser_overlays`.
+    pub fn all_browser_overlays(&self) -> Vec<&BrowserOverlayConfig> {
+        let mut all: Vec<&BrowserOverlayConfig> = Vec::new();
+        if let Some(ref single) = self.browser_overlay {
+            all.push(single);
+        }
+        all.extend(self.browser_overlays.iter());
+        all
+    }
 }
 
 fn default_frame_rate() -> u32 {
@@ -104,16 +121,16 @@ impl Config {
                     anyhow::bail!("Channel '{}': ndi_input opacity must be 0.0–1.0", ch.name);
                 }
             }
-            if let Some(ref browser) = ch.browser_overlay {
+            for browser in ch.all_browser_overlays() {
                 if browser.width == 0 || browser.height == 0 {
                     anyhow::bail!(
-                        "Channel '{}': browser width and height must be > 0",
+                        "Channel '{}': browser overlay width and height must be > 0",
                         ch.name
                     );
                 }
                 if !(0.0..=1.0).contains(&browser.opacity) {
                     anyhow::bail!(
-                        "Channel '{}': browser_overlay opacity must be 0.0–1.0",
+                        "Channel '{}': browser overlay opacity must be 0.0–1.0",
                         ch.name
                     );
                 }
@@ -123,6 +140,8 @@ impl Config {
     }
 
     pub fn has_browser_overlays(&self) -> bool {
-        self.channel.iter().any(|ch| ch.browser_overlay.is_some())
+        self.channel
+            .iter()
+            .any(|ch| !ch.all_browser_overlays().is_empty())
     }
 }

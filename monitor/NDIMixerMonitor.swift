@@ -15,7 +15,7 @@ struct ChannelStatus: Codable {
     let resolution: String
     let frame_rate: UInt32
     let ndi_input: NdiInputStatus?
-    let browser_overlay: BrowserOverlayStatus?
+    let browser_overlays: [BrowserOverlayStatus]
     let frames_output: UInt64
 }
 
@@ -225,11 +225,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 items.ndiItem.title = "  NDI: \u{2014}"
             }
 
-            if let browser = ch.browser_overlay {
-                let symbol = browser.loaded ? "\u{2713}" : "\u{2717}"
-                items.browserItem.title = "  Browser: \(symbol) loaded"
-            } else {
+            if ch.browser_overlays.isEmpty {
                 items.browserItem.title = "  Browser: \u{2014}"
+            } else {
+                let loadedCount = ch.browser_overlays.filter { $0.loaded }.count
+                let total = ch.browser_overlays.count
+                if loadedCount == total {
+                    if total == 1 {
+                        items.browserItem.title = "  Browser: \u{2713} loaded"
+                    } else {
+                        items.browserItem.title = "  Browser: \u{2713} \(total) loaded"
+                    }
+                } else {
+                    items.browserItem.title = "  Browser: \u{2717} \(loadedCount)/\(total) loaded"
+                }
             }
 
             items.outputItem.title = "  Output: \(ch.output_name) \(ch.resolution)@\(ch.frame_rate)"

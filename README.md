@@ -10,9 +10,9 @@ OBS throttles rendering on non-active scenes/mixes. If you need multiple simulta
 
 - **Multi-channel mixing** — define as many channels as you need, each with independent settings
 - **NDI input** — receive any NDI source as a video layer (zero or one per channel)
-- **HTML/browser overlay** — render any URL as a transparent overlay layer (zero or one per channel)
+- **HTML/browser overlays** — render any URL as a transparent overlay layer (multiple per channel supported)
 - **Per-channel output resolution** — configure each channel's output size (e.g., 1920x1080, 1280x720)
-- **Per-layer browser resolution** — the browser overlay can render at a different resolution than the output
+- **Per-layer browser resolution** — each browser overlay can render at a different resolution than the output
 - **Layer ordering** — control z-index of NDI input vs. browser overlay
 - **Layer opacity** — per-layer opacity control (0.0–1.0)
 - **Transparent HTML support** — HTML pages with transparent backgrounds composite correctly (like OBS browser sources)
@@ -24,39 +24,39 @@ OBS throttles rendering on non-active scenes/mixes. If you need multiple simulta
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   NDI Mixer                      │
-│                                                  │
-│  ┌─────────── Channel "Main" ──────────────┐    │
-│  │                                          │    │
-│  │  ┌──────────┐    ┌──────────────────┐   │    │
-│  │  │ NDI In   │    │ Browser Overlay  │   │    │
-│  │  │ (camera) │    │ (HTML/CSS/JS)    │   │    │
-│  │  │ z:0 α:1  │    │ z:1 α:0.8       │   │    │
-│  │  └────┬─────┘    └───────┬──────────┘   │    │
-│  │       │                  │              │    │
-│  │       └──────┬───────────┘              │    │
-│  │              ▼                          │    │
-│  │        ┌───────────┐                    │    │
-│  │        │ Composite │                    │    │
-│  │        │ 1920x1080 │                    │    │
-│  │        └─────┬─────┘                    │    │
-│  │              ▼                          │    │
-│  │        ┌───────────┐                    │    │
-│  │        │ NDI Out   │                    │    │
-│  │        │ "Mixer-   │                    │    │
-│  │        │  Main"    │                    │    │
-│  │        └───────────┘                    │    │
-│  └──────────────────────────────────────────┘    │
-│                                                  │
-│  ┌─────────── Channel "PiP" ───────────────┐    │
-│  │  ...                                     │    │
-│  └──────────────────────────────────────────┘    │
-│                                                  │
-│  ┌─ Status Endpoint (optional) ─┐               │
-│  │  GET http://localhost:9100    │               │
-│  └──────────────────────────────┘               │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                        NDI Mixer                          │
+│                                                           │
+│  ┌────────────── Channel "Main" ───────────────────┐     │
+│  │                                                  │     │
+│  │  ┌──────────┐  ┌─────────────┐  ┌────────────┐  │     │
+│  │  │ NDI In   │  │ Overlay 1   │  │ Overlay 2  │  │     │
+│  │  │ (camera) │  │ (CRT effect)│  │ (alerts)   │  │     │
+│  │  │ z:0 α:1  │  │ z:1 α:1    │  │ z:2 α:1    │  │     │
+│  │  └────┬─────┘  └──────┬─────┘  └─────┬──────┘  │     │
+│  │       │               │               │         │     │
+│  │       └───────┬───────┴───────────────┘         │     │
+│  │               ▼                                  │     │
+│  │         ┌───────────┐                            │     │
+│  │         │ Composite │                            │     │
+│  │         │ 1920x1080 │                            │     │
+│  │         └─────┬─────┘                            │     │
+│  │               ▼                                  │     │
+│  │         ┌───────────┐                            │     │
+│  │         │ NDI Out   │                            │     │
+│  │         │ "Mixer-   │                            │     │
+│  │         │  Main"    │                            │     │
+│  │         └───────────┘                            │     │
+│  └──────────────────────────────────────────────────┘     │
+│                                                           │
+│  ┌────────────── Channel "PiP" ────────────────────┐     │
+│  │  ...                                             │     │
+│  └──────────────────────────────────────────────────┘     │
+│                                                           │
+│  ┌─ Status Endpoint (optional) ─┐                        │
+│  │  GET http://localhost:9100    │                        │
+│  └──────────────────────────────┘                        │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ## Configuration
@@ -77,7 +77,7 @@ NDI Mixer is configured via a single `config.toml` file.
 status_port = 9100           # Optional HTTP status endpoint (0 = disabled)
 log_level = "info"           # debug, info, warn, error
 
-# Channel definitions
+# Channel with multiple browser overlays
 [[channel]]
 name = "Main"
 output_name = "Mixer-Main"   # NDI output name visible on the network
@@ -90,15 +90,23 @@ frame_rate = 30              # Output frame rate
   z_index = 0                # Layer order (lower = behind)
   opacity = 1.0              # Layer opacity (0.0 - 1.0)
 
-  [channel.browser_overlay]
-  url = "https://example.com/overlay.html"
+  [[channel.browser_overlays]]
+  url = "https://example.com/crt-overlay.html"
   width = 1920               # Browser render resolution
   height = 1080
   z_index = 1                # Rendered on top of NDI input
-  opacity = 0.8
+  opacity = 1.0
   css = ""                   # Optional injected CSS
   reload_interval = 0        # Auto-reload in seconds (0 = disabled)
 
+  [[channel.browser_overlays]]
+  url = "https://example.com/alerts-overlay.html"
+  width = 1920
+  height = 1080
+  z_index = 2                # Rendered on top of first overlay
+  opacity = 1.0
+
+# Channel with no overlays — clean feed, NDI passthrough
 [[channel]]
 name = "Clean Feed"
 output_name = "Mixer-Clean"
@@ -110,8 +118,6 @@ frame_rate = 30
   source = "MY-PC (Camera)"
   z_index = 0
   opacity = 1.0
-
-  # No browser overlay — clean feed, NDI passthrough
 ```
 
 ### Configuration Reference
@@ -143,7 +149,9 @@ frame_rate = 30
 
 **NDI source matching:** The `source` field uses substring matching — you don't need to specify the full NDI source name. For example, `"Synesthesia"` will match `"MY-PC (Synesthesia)"`. The full matched source name is logged at startup. Use `--list-sources` to see all available NDI names on your network.
 
-#### `[channel.browser_overlay]` (optional)
+#### `[[channel.browser_overlays]]` (optional, multiple allowed)
+
+Each channel can have zero or more browser overlays. Each overlay is a separate browser tab rendered as a transparent layer.
 
 | Field              | Type   | Required | Description                              |
 |--------------------|--------|----------|------------------------------------------|
@@ -154,6 +162,8 @@ frame_rate = 30
 | `opacity`          | float  | `1.0`    | Layer opacity (0.0–1.0)                 |
 | `css`              | string | `""`     | CSS to inject into the page              |
 | `reload_interval`  | int    | `0`      | Auto-reload interval in seconds (0=off)  |
+
+The legacy singular `[channel.browser_overlay]` syntax is still supported for backwards compatibility.
 
 ## Technology
 
@@ -290,10 +300,16 @@ curl http://localhost:9100/status
         "connected": true,
         "frames_received": 102630
       },
-      "browser_overlay": {
-        "url": "https://example.com/overlay.html",
-        "loaded": true
-      },
+      "browser_overlays": [
+        {
+          "url": "https://example.com/crt-overlay.html",
+          "loaded": true
+        },
+        {
+          "url": "https://example.com/alerts-overlay.html",
+          "loaded": true
+        }
+      ],
       "frames_output": 102628
     }
   ]
@@ -413,7 +429,7 @@ The `KeepAlive` option ensures ndimixer automatically restarts if it crashes.
 - [ ] Hot-reload config (SIGHUP or file watch)
 - [ ] Audio passthrough from NDI input
 - [ ] Multiple NDI inputs per channel
-- [ ] Multiple browser overlays per channel
+- [x] Multiple browser overlays per channel
 - [ ] GPU-accelerated compositing (wgpu)
 
 ## License

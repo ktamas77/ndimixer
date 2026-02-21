@@ -153,15 +153,27 @@ fn print_terminal_status(channels: &[Arc<ChannelState>]) {
             "NDI: -".to_string()
         };
 
-        let browser_status = if ch.browser_url.is_some() {
-            let loaded = *ch.browser_loaded.lock().unwrap();
-            if loaded {
-                "Browser: \x1b[32m+\x1b[0m loaded".to_string()
-            } else {
-                "Browser: \x1b[33m~\x1b[0m loading".to_string()
-            }
-        } else {
+        let browser_status = if ch.browser_overlays.is_empty() {
             "Browser: -".to_string()
+        } else {
+            let loaded_count = ch
+                .browser_overlays
+                .iter()
+                .filter(|b| *b.loaded.lock().unwrap())
+                .count();
+            let total = ch.browser_overlays.len();
+            if loaded_count == total {
+                if total == 1 {
+                    "Browser: \x1b[32m+\x1b[0m loaded".to_string()
+                } else {
+                    format!("Browser: \x1b[32m+\x1b[0m {} loaded", total)
+                }
+            } else {
+                format!(
+                    "Browser: \x1b[33m~\x1b[0m {}/{} loaded",
+                    loaded_count, total
+                )
+            }
         };
 
         let frames = *ch.frames_output.lock().unwrap();

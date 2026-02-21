@@ -19,7 +19,7 @@ struct ChannelStatusJson {
     resolution: String,
     frame_rate: u32,
     ndi_input: Option<NdiInputStatus>,
-    browser_overlay: Option<BrowserOverlayStatus>,
+    browser_overlays: Vec<BrowserOverlayStatus>,
     frames_output: u64,
 }
 
@@ -71,10 +71,14 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRespon
                 frames_received: *ch.ndi_frames_received.lock().unwrap(),
             });
 
-            let browser_overlay = ch.browser_url.as_ref().map(|url| BrowserOverlayStatus {
-                url: url.clone(),
-                loaded: *ch.browser_loaded.lock().unwrap(),
-            });
+            let browser_overlays: Vec<BrowserOverlayStatus> = ch
+                .browser_overlays
+                .iter()
+                .map(|b| BrowserOverlayStatus {
+                    url: b.url.clone(),
+                    loaded: *b.loaded.lock().unwrap(),
+                })
+                .collect();
 
             ChannelStatusJson {
                 name: ch.name.clone(),
@@ -82,7 +86,7 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRespon
                 resolution: format!("{}x{}", ch.width, ch.height),
                 frame_rate: ch.frame_rate,
                 ndi_input,
-                browser_overlay,
+                browser_overlays,
                 frames_output: *ch.frames_output.lock().unwrap(),
             }
         })
