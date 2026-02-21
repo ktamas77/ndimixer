@@ -9,6 +9,8 @@ pub struct GpuContext {
     pub blend_layout: wgpu::BindGroupLayout,
     pub clear_pipeline: wgpu::ComputePipeline,
     pub clear_layout: wgpu::BindGroupLayout,
+    pub filter_layout: wgpu::BindGroupLayout,
+    pub filter_pipeline_layout: wgpu::PipelineLayout,
 }
 
 impl GpuContext {
@@ -170,6 +172,49 @@ impl GpuContext {
             cache: None,
         });
 
+        // Filter pipeline layout: input texture (read) + output storage (write) + uniform buffer
+        let filter_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("filter_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let filter_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("filter_pl"),
+            bind_group_layouts: &[&filter_layout],
+            immediate_size: 0,
+        });
+
         tracing::info!("GPU compute compositor initialized");
 
         Some(Arc::new(Self {
@@ -179,6 +224,31 @@ impl GpuContext {
             blend_layout,
             clear_pipeline,
             clear_layout,
+            filter_layout,
+            filter_pipeline_layout,
         }))
+    }
+
+    /// Compile a filter compute shader from WGSL source code.
+    pub fn compile_filter_pipeline(
+        &self,
+        label: &str,
+        wgsl_source: &str,
+    ) -> Result<wgpu::ComputePipeline, String> {
+        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(wgsl_source.into()),
+        });
+
+        let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(label),
+            layout: Some(&self.filter_pipeline_layout),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        Ok(pipeline)
     }
 }

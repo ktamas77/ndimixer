@@ -17,6 +17,15 @@ frame_rate = 30
   z_index = 0
   opacity = 1.0
 
+  # Per-layer shader filters (GPU only, applied before compositing)
+  # Params are passed to the shader alphabetically by key name.
+  # [[channel.ndi_input.filters]]
+  # shader = "src/shaders/filters/color_adjust.wgsl"
+  # [channel.ndi_input.filters.params]
+  # brightness = 0.1
+  # contrast = 1.2
+  # saturation = 1.0
+
   # Browser overlays — add as many as you need
   [[channel.browser_overlays]]
   url = "https://example.com/overlay.html"
@@ -27,12 +36,33 @@ frame_rate = 30
   css = ""
   reload_interval = 0
 
+  # Per-overlay shader filters
+  # [[channel.browser_overlays.filters]]
+  # shader = "src/shaders/filters/chromatic_aberration.wgsl"
+  # [channel.browser_overlays.filters.params]
+  # amount = 2.0
+  # angle = 0.0
+
   # [[channel.browser_overlays]]
   # url = "https://example.com/alerts.html"
   # width = 1920
   # height = 1080
   # z_index = 2
   # opacity = 1.0
+
+# Channel-level post-processing filters (applied after all layers composited)
+# [[channel.filters]]
+# shader = "src/shaders/filters/vignette.wgsl"
+# [channel.filters.params]
+# radius = 0.8
+# softness = 0.3
+
+# [[channel.filters]]
+# shader = "src/shaders/filters/scanlines.wgsl"
+# [channel.filters.params]
+# intensity = 0.3
+# scroll = 0.0
+# spacing = 2.0
 
 # Channel 2: Clean feed (no overlay)
 # [[channel]]

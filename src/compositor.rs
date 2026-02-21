@@ -1,9 +1,18 @@
 use image::RgbaImage;
 
+/// Identifies which pre-compiled filter chain to use for a layer.
+#[derive(Debug, Clone, Copy)]
+pub enum LayerSource {
+    Ndi,
+    Browser(#[allow(dead_code)] usize),
+}
+
 pub struct Layer<'a> {
     pub image: &'a RgbaImage,
     pub opacity: f32,
     pub z_index: i32,
+    #[allow(dead_code)]
+    pub source: LayerSource,
 }
 
 /// Composite layers onto a caller-owned canvas (reused across frames).

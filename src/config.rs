@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +31,13 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct FilterConfig {
+    pub shader: String,
+    #[serde(default)]
+    pub params: HashMap<String, f32>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ChannelConfig {
     pub name: String,
@@ -45,6 +53,9 @@ pub struct ChannelConfig {
     /// Multiple overlays (`[[channel.browser_overlays]]`)
     #[serde(default)]
     browser_overlays: Vec<BrowserOverlayConfig>,
+    /// Channel-level post-processing filters (applied after all layers composited)
+    #[serde(default)]
+    pub filters: Vec<FilterConfig>,
 }
 
 impl ChannelConfig {
@@ -70,6 +81,8 @@ pub struct NdiInputConfig {
     pub z_index: i32,
     #[serde(default = "default_opacity")]
     pub opacity: f32,
+    #[serde(default)]
+    pub filters: Vec<FilterConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +98,8 @@ pub struct BrowserOverlayConfig {
     pub css: String,
     #[serde(default)]
     pub reload_interval: u64,
+    #[serde(default)]
+    pub filters: Vec<FilterConfig>,
 }
 
 fn default_opacity() -> f32 {
@@ -93,6 +108,26 @@ fn default_opacity() -> f32 {
 
 fn default_z_index_overlay() -> i32 {
     1
+}
+
+fn validate_filter(filter: &FilterConfig, channel: &str, layer: &str) -> anyhow::Result<()> {
+    if !Path::new(&filter.shader).exists() {
+        anyhow::bail!(
+            "Channel '{}': {} filter shader not found: {}",
+            channel,
+            layer,
+            filter.shader
+        );
+    }
+    if filter.params.len() > 16 {
+        anyhow::bail!(
+            "Channel '{}': {} filter has {} params (max 16)",
+            channel,
+            layer,
+            filter.params.len()
+        );
+    }
+    Ok(())
 }
 
 impl Config {
@@ -120,6 +155,12 @@ impl Config {
                 if !(0.0..=1.0).contains(&ndi.opacity) {
                     anyhow::bail!("Channel '{}': ndi_input opacity must be 0.0–1.0", ch.name);
                 }
+                for filter in &ndi.filters {
+                    validate_filter(filter, &ch.name, "ndi_input")?;
+                }
+            }
+            for filter in &ch.filters {
+                validate_filter(filter, &ch.name, "channel")?;
             }
             for browser in ch.all_browser_overlays() {
                 if browser.width == 0 || browser.height == 0 {
@@ -133,6 +174,9 @@ impl Config {
                         "Channel '{}': browser overlay opacity must be 0.0–1.0",
                         ch.name
                     );
+                }
+                for filter in &browser.filters {
+                    validate_filter(filter, &ch.name, "browser_overlay")?;
                 }
             }
         }

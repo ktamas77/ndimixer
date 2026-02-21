@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::browser::BrowserOverlay;
-use crate::compositor::{self, Layer};
+use crate::compositor::{self, Layer, LayerSource};
 use crate::config::ChannelConfig;
 use crate::ndi_input::NdiInput;
 use crate::ndi_output::NdiOutput;
@@ -26,6 +26,7 @@ fn take_frame(lock: &Mutex<Option<RgbaImage>>) -> Option<RgbaImage> {
 pub struct BrowserOverlayState {
     pub url: String,
     pub loaded: Arc<Mutex<bool>>,
+    pub filters: Vec<String>,
 }
 
 /// Runtime state for a single channel, used for status reporting.
@@ -38,7 +39,9 @@ pub struct ChannelState {
     pub ndi_connected: Arc<Mutex<bool>>,
     pub ndi_frames_received: Arc<Mutex<u64>>,
     pub ndi_source: Option<String>,
+    pub ndi_filters: Vec<String>,
     pub browser_overlays: Vec<BrowserOverlayState>,
+    pub channel_filters: Vec<String>,
     pub frames_output: Arc<Mutex<u64>>,
 }
 
@@ -106,6 +109,7 @@ impl Channel {
             .map(|(cfg, overlay)| BrowserOverlayState {
                 url: cfg.url.clone(),
                 loaded: overlay.loaded.clone(),
+                filters: cfg.filters.iter().map(|f| f.shader.clone()).collect(),
             })
             .collect();
 
@@ -118,7 +122,13 @@ impl Channel {
             ndi_connected: ndi_connected.clone(),
             ndi_frames_received: ndi_frames_received.clone(),
             ndi_source: config.ndi_input.as_ref().map(|c| c.source.clone()),
+            ndi_filters: config
+                .ndi_input
+                .as_ref()
+                .map(|c| c.filters.iter().map(|f| f.shader.clone()).collect())
+                .unwrap_or_default(),
             browser_overlays: browser_overlay_states,
+            channel_filters: config.filters.iter().map(|f| f.shader.clone()).collect(),
             frames_output: frames_output.clone(),
         };
 
@@ -139,15 +149,59 @@ impl Channel {
 
         let channel_name = config.name.clone();
 
+        // Check if any filters are configured
+        let has_any_filters = config
+            .ndi_input
+            .as_ref()
+            .is_some_and(|c| !c.filters.is_empty())
+            || overlay_configs.iter().any(|cfg| !cfg.filters.is_empty())
+            || !config.filters.is_empty();
+
         // Create per-channel GPU compositor if available
         #[cfg(feature = "gpu")]
-        let mut gpu_compositor = gpu_ctx.map(|ctx| {
-            crate::gpu_compositor::GpuCompositor::new(ctx, width, height)
-        });
+        let mut gpu_compositor = {
+            let ndi_filter_configs: Vec<_> = config
+                .ndi_input
+                .as_ref()
+                .map(|c| c.filters.clone())
+                .unwrap_or_default();
+            let browser_filter_configs: Vec<Vec<_>> = overlay_configs
+                .iter()
+                .map(|cfg| cfg.filters.clone())
+                .collect();
+            let channel_filter_configs = config.filters.clone();
+
+            gpu_ctx.map(|ctx| {
+                crate::gpu_compositor::GpuCompositor::new(
+                    ctx,
+                    width,
+                    height,
+                    &ndi_filter_configs,
+                    &browser_filter_configs,
+                    &channel_filter_configs,
+                )
+            })
+        };
 
         // Suppress unused variable warning when gpu feature is off
         #[cfg(not(feature = "gpu"))]
         let _ = gpu_ctx;
+
+        // Warn if filters configured but no GPU
+        if has_any_filters {
+            #[cfg(not(feature = "gpu"))]
+            tracing::warn!(
+                "Channel '{}': shader filters configured but GPU feature is disabled — filters will be skipped",
+                config.name
+            );
+            #[cfg(feature = "gpu")]
+            if gpu_compositor.is_none() {
+                tracing::warn!(
+                    "Channel '{}': shader filters configured but GPU is unavailable — filters will be skipped",
+                    config.name
+                );
+            }
+        }
 
         // Dedicated render thread — no async overhead, precise frame timing
         let thread = std::thread::Builder::new()
@@ -195,6 +249,7 @@ impl Channel {
                             image: img,
                             opacity: ndi_opacity,
                             z_index: ndi_z,
+                            source: LayerSource::Ndi,
                         });
                     }
                     for (i, (_, opacity, z_index)) in browser_layers.iter().enumerate() {
@@ -203,6 +258,7 @@ impl Channel {
                                 image: img,
                                 opacity: *opacity,
                                 z_index: *z_index,
+                                source: LayerSource::Browser(i),
                             });
                         }
                     }

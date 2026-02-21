@@ -21,6 +21,8 @@ struct ChannelStatusJson {
     frame_rate: u32,
     ndi_input: Option<NdiInputStatus>,
     browser_overlays: Vec<BrowserOverlayStatus>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    filters: Vec<String>,
     frames_output: u64,
 }
 
@@ -29,12 +31,16 @@ struct NdiInputStatus {
     source: String,
     connected: bool,
     frames_received: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    filters: Vec<String>,
 }
 
 #[derive(Serialize)]
 struct BrowserOverlayStatus {
     url: String,
     loaded: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    filters: Vec<String>,
 }
 
 struct AppState {
@@ -72,6 +78,7 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRespon
                 source: src.clone(),
                 connected: *ch.ndi_connected.lock().unwrap(),
                 frames_received: *ch.ndi_frames_received.lock().unwrap(),
+                filters: ch.ndi_filters.clone(),
             });
 
             let browser_overlays: Vec<BrowserOverlayStatus> = ch
@@ -80,6 +87,7 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRespon
                 .map(|b| BrowserOverlayStatus {
                     url: b.url.clone(),
                     loaded: *b.loaded.lock().unwrap(),
+                    filters: b.filters.clone(),
                 })
                 .collect();
 
@@ -90,6 +98,7 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRespon
                 frame_rate: ch.frame_rate,
                 ndi_input,
                 browser_overlays,
+                filters: ch.channel_filters.clone(),
                 frames_output: *ch.frames_output.lock().unwrap(),
             }
         })

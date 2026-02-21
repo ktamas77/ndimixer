@@ -22,6 +22,9 @@ impl SharedBrowser {
             .arg("--disable-gpu")
             .arg("--no-sandbox")
             .arg("--disable-dev-shm-usage")
+            .arg("--disable-background-timer-throttling")
+            .arg("--disable-backgrounding-occluded-windows")
+            .arg("--disable-renderer-backgrounding")
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build browser config: {}", e))?;
 
