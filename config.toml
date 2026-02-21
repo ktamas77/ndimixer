@@ -1,0 +1,40 @@
+# NDI Mixer — Example Configuration
+
+[settings]
+status_port = 9100           # HTTP status endpoint port (0 = disabled)
+log_level = "info"           # debug, info, warn, error
+
+# Channel 1: Camera with overlay
+[[channel]]
+name = "Main"
+output_name = "Mixer-Main"
+width = 1920
+height = 1080
+frame_rate = 30
+
+  [channel.ndi_input]
+  source = "MY-PC (Camera)"
+  z_index = 0
+  opacity = 1.0
+
+  [channel.browser_overlay]
+  url = "https://example.com/overlay.html"
+  width = 1920
+  height = 1080
+  z_index = 1
+  opacity = 0.8
+  css = ""
+  reload_interval = 0
+
+# Channel 2: Clean feed (no overlay)
+# [[channel]]
+# name = "Clean Feed"
+# output_name = "Mixer-Clean"
+# width = 1920
+# height = 1080
+# frame_rate = 30
+#
+#   [channel.ndi_input]
+#   source = "MY-PC (Camera)"
+#   z_index = 0
+#   opacity = 1.0
