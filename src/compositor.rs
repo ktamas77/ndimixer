@@ -8,7 +8,7 @@ pub struct Layer {
 
 /// Composite layers onto a caller-owned canvas (reused across frames).
 /// Canvas is cleared to opaque black, then layers are blended by z_index order.
-pub fn composite(canvas: &mut RgbaImage, layers: &mut Vec<Layer>) {
+pub fn composite(canvas: &mut RgbaImage, layers: &mut [Layer]) {
     let (width, height) = canvas.dimensions();
 
     // Clear canvas to opaque black
@@ -47,7 +47,8 @@ fn blend_layer(dst: &mut RgbaImage, src: &RgbaImage, opacity: f32, width: u32, h
     if sw == width && sh == height {
         blend_direct(dst, src, opacity);
     } else {
-        let scaled = image::imageops::resize(src, width, height, image::imageops::FilterType::Nearest);
+        let scaled =
+            image::imageops::resize(src, width, height, image::imageops::FilterType::Nearest);
         blend_direct(dst, &scaled, opacity);
     }
 }

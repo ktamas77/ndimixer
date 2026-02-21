@@ -14,7 +14,11 @@ use tokio_util::sync::CancellationToken;
 use channel::ChannelState;
 
 #[derive(Parser)]
-#[command(name = "ndimixer", version, about = "Headless NDI mixer with HTML overlay support")]
+#[command(
+    name = "ndimixer",
+    version,
+    about = "Headless NDI mixer with HTML overlay support"
+)]
 struct Cli {
     /// Path to config file
     #[arg(short, long, default_value = "config.toml")]
@@ -29,18 +33,10 @@ struct Cli {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
-    // Initialize NDI
+    // Initialize NDI (needed for --list-sources before config is loaded)
     let ndi = grafton_ndi::NDI::new()?;
 
-    // Handle --list-sources
+    // Handle --list-sources (no config needed)
     if cli.list_sources {
         let sources = ndi_input::list_sources(&ndi)?;
         if sources.is_empty() {
@@ -60,6 +56,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Load config
     let config = config::Config::load(&cli.config)?;
+
+    // Initialize logging with level from config
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.settings.log_level)),
+        )
+        .init();
 
     tracing::info!(
         "NDI Mixer v{} starting with {} channel{}",
@@ -92,7 +96,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Collect Arc<ChannelState> for shared access
-    let channel_states: Vec<Arc<ChannelState>> = channels.iter().map(|ch| ch.state.clone()).collect();
+    let channel_states: Vec<Arc<ChannelState>> =
+        channels.iter().map(|ch| ch.state.clone()).collect();
 
     // Start HTTP status endpoint if configured
     let status_port = config.settings.status_port;

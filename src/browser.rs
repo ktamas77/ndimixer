@@ -103,14 +103,7 @@ impl BrowserOverlay {
         let url_owned = url.to_string();
 
         let task = tokio::spawn(async move {
-            if let Err(e) = capture_loop(
-                page,
-                &url_owned,
-                reload_interval,
-                frame_ref,
-                cancel,
-            )
-            .await
+            if let Err(e) = capture_loop(page, &url_owned, reload_interval, frame_ref, cancel).await
             {
                 tracing::error!("Browser overlay error: {}", e);
             }
@@ -139,9 +132,7 @@ async fn capture_loop(
         }
 
         // Handle reload interval
-        if reload_interval > 0
-            && last_reload.elapsed() >= Duration::from_secs(reload_interval)
-        {
+        if reload_interval > 0 && last_reload.elapsed() >= Duration::from_secs(reload_interval) {
             let _ = page.reload().await;
             last_reload = tokio::time::Instant::now();
             tokio::time::sleep(Duration::from_millis(500)).await;

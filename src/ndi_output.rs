@@ -1,5 +1,5 @@
 use anyhow::Result;
-use grafton_ndi::{BorrowedVideoFrame, PixelFormat, SenderOptions, Sender, NDI};
+use grafton_ndi::{BorrowedVideoFrame, PixelFormat, Sender, SenderOptions, NDI};
 use image::RgbaImage;
 
 pub struct NdiOutput {
@@ -9,14 +9,26 @@ pub struct NdiOutput {
 }
 
 impl NdiOutput {
-    pub fn new(ndi: &NDI, output_name: &str, width: u32, height: u32, frame_rate: u32) -> Result<Self> {
+    pub fn new(
+        ndi: &NDI,
+        output_name: &str,
+        width: u32,
+        height: u32,
+        frame_rate: u32,
+    ) -> Result<Self> {
         let opts = SenderOptions::builder(output_name)
             .clock_video(true)
             .clock_audio(false)
             .build();
         let sender = Sender::new(ndi, &opts)?;
 
-        tracing::info!("NDI output '{}' created ({}x{}@{}fps)", output_name, width, height, frame_rate);
+        tracing::info!(
+            "NDI output '{}' created ({}x{}@{}fps)",
+            output_name,
+            width,
+            height,
+            frame_rate
+        );
 
         let buf_size = (width * height * 4) as usize;
 

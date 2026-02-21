@@ -111,7 +111,11 @@ impl Channel {
         // Layer z-index and opacity config
         let ndi_z = config.ndi_input.as_ref().map(|c| c.z_index).unwrap_or(0);
         let ndi_opacity = config.ndi_input.as_ref().map(|c| c.opacity).unwrap_or(1.0);
-        let browser_z = config.browser_overlay.as_ref().map(|c| c.z_index).unwrap_or(1);
+        let browser_z = config
+            .browser_overlay
+            .as_ref()
+            .map(|c| c.z_index)
+            .unwrap_or(1);
         let browser_opacity = config
             .browser_overlay
             .as_ref()
@@ -125,15 +129,20 @@ impl Channel {
         let cancel_clone = cancel.clone();
 
         let task = tokio::spawn(async move {
-            tracing::info!("Channel '{}' started ({}x{}@{}fps)", channel_name, width, height, frame_rate);
+            tracing::info!(
+                "Channel '{}' started ({}x{}@{}fps)",
+                channel_name,
+                width,
+                height,
+                frame_rate
+            );
 
             let mut interval = tokio::time::interval(frame_interval);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             // Reusable canvas — allocated once, cleared each frame by compositor
-            let mut canvas: RgbaImage = ImageBuffer::from_pixel(
-                width, height, Rgba([0, 0, 0, 255]),
-            );
+            let mut canvas: RgbaImage =
+                ImageBuffer::from_pixel(width, height, Rgba([0, 0, 0, 255]));
             let mut layers = Vec::with_capacity(2);
             let mut ndi_output = ndi_output;
 
@@ -191,6 +200,9 @@ impl Channel {
             tracing::info!("Channel '{}' stopped", channel_name);
         });
 
-        Ok(Self { state: Arc::new(state), _task: task })
+        Ok(Self {
+            state: Arc::new(state),
+            _task: task,
+        })
     }
 }

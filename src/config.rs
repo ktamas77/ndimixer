@@ -106,7 +106,10 @@ impl Config {
             }
             if let Some(ref browser) = ch.browser_overlay {
                 if browser.width == 0 || browser.height == 0 {
-                    anyhow::bail!("Channel '{}': browser width and height must be > 0", ch.name);
+                    anyhow::bail!(
+                        "Channel '{}': browser width and height must be > 0",
+                        ch.name
+                    );
                 }
                 if !(0.0..=1.0).contains(&browser.opacity) {
                     anyhow::bail!(

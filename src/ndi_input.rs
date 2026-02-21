@@ -1,5 +1,7 @@
 use anyhow::Result;
-use grafton_ndi::{Finder, FinderOptions, Receiver, ReceiverColorFormat, ReceiverOptions, Source, NDI};
+use grafton_ndi::{
+    Finder, FinderOptions, Receiver, ReceiverColorFormat, ReceiverOptions, Source, NDI,
+};
 use image::{ImageBuffer, RgbaImage};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,11 +16,7 @@ pub struct NdiInput {
 }
 
 impl NdiInput {
-    pub fn start(
-        ndi: &NDI,
-        source_name: &str,
-        cancel: CancellationToken,
-    ) -> Result<Self> {
+    pub fn start(ndi: &NDI, source_name: &str, cancel: CancellationToken) -> Result<Self> {
         let latest_frame: Arc<Mutex<Option<RgbaImage>>> = Arc::new(Mutex::new(None));
         let connected: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
         let frames_received: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
@@ -30,7 +28,16 @@ impl NdiInput {
         let ndi = ndi.clone();
 
         let task = tokio::spawn(async move {
-            if let Err(e) = receive_loop(&ndi, &source_name, frame_ref, connected_ref, frames_ref, cancel).await {
+            if let Err(e) = receive_loop(
+                &ndi,
+                &source_name,
+                frame_ref,
+                connected_ref,
+                frames_ref,
+                cancel,
+            )
+            .await
+            {
                 tracing::error!("NDI input '{}' error: {}", source_name, e);
             }
         });
@@ -98,9 +105,7 @@ async fn receive_loop(
 }
 
 async fn find_source(ndi: &NDI, source_name: &str, cancel: &CancellationToken) -> Result<Source> {
-    let finder_opts = FinderOptions::builder()
-        .show_local_sources(true)
-        .build();
+    let finder_opts = FinderOptions::builder().show_local_sources(true).build();
     let finder = Finder::new(ndi, &finder_opts)?;
 
     loop {
@@ -111,7 +116,11 @@ async fn find_source(ndi: &NDI, source_name: &str, cancel: &CancellationToken) -
         let sources = finder.find_sources(Duration::from_secs(2))?;
         for source in &sources {
             if source.name.contains(source_name) {
-                tracing::info!("NDI input: '{}' matched source '{}'", source_name, source.name);
+                tracing::info!(
+                    "NDI input: '{}' matched source '{}'",
+                    source_name,
+                    source.name
+                );
                 return Ok(source.clone());
             }
         }
@@ -123,9 +132,7 @@ async fn find_source(ndi: &NDI, source_name: &str, cancel: &CancellationToken) -
 
 /// List all NDI sources visible on the network.
 pub fn list_sources(ndi: &NDI) -> Result<Vec<String>> {
-    let finder_opts = FinderOptions::builder()
-        .show_local_sources(true)
-        .build();
+    let finder_opts = FinderOptions::builder().show_local_sources(true).build();
     let finder = Finder::new(ndi, &finder_opts)?;
 
     println!("Searching for NDI sources (5 seconds)...");
