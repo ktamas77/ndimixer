@@ -176,11 +176,48 @@ frame_rate = 30
 
 ## Prerequisites
 
-- **NDI 6 SDK** — download from [ndi.video](https://ndi.video/for-developers/ndi-sdk/) and install
-- **Rust toolchain** — install via [rustup](https://rustup.rs/)
-- **Chromium/Chrome** — required for HTML overlay rendering (must be installed on the system)
+- **NDI 6 SDK** — runtime library (`libndi`) required
+- **Rust toolchain** — for building from source
+- **Google Chrome or Chromium** — required for HTML overlay rendering
 
-## Building
+## Installation (macOS)
+
+### 1. Install Rust
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### 2. Install NDI Tools (includes NDI runtime)
+
+Download and install from [ndi.video](https://ndi.video/for-developers/ndi-sdk/download/), or use the direct installer:
+
+```bash
+open https://downloads.ndi.tv/Tools/NDIToolsInstaller.pkg
+```
+
+If you get `libndi.dylib` errors after install, fix permissions and re-run the installer:
+
+```bash
+sudo mkdir -p /usr/local/lib
+sudo chmod 755 /usr/local/lib
+```
+
+Verify the library is installed:
+
+```bash
+ls /usr/local/lib/libndi.dylib
+```
+
+### 3. Install Chrome
+
+If not already installed, download from [google.com/chrome](https://www.google.com/chrome/) or:
+
+```bash
+brew install --cask google-chrome
+```
+
+### 4. Build
 
 ```bash
 git clone https://github.com/ktamas77/ndimixer.git
@@ -188,17 +225,30 @@ cd ndimixer
 cargo build --release
 ```
 
+### 5. Configure
+
+```bash
+cp config.example.toml config.toml
+# Edit config.toml with your NDI sources and overlay URLs
+```
+
 ## Usage
 
 ```bash
-# Run with default config file (./config.toml)
-./target/release/ndimixer
+# Run (macOS requires DYLD_LIBRARY_PATH for NDI)
+DYLD_LIBRARY_PATH=/usr/local/lib ./target/release/ndimixer
 
 # Run with a specific config file
-./target/release/ndimixer --config /path/to/config.toml
+DYLD_LIBRARY_PATH=/usr/local/lib ./target/release/ndimixer --config /path/to/config.toml
 
 # List available NDI sources on the network
-./target/release/ndimixer --list-sources
+DYLD_LIBRARY_PATH=/usr/local/lib ./target/release/ndimixer --list-sources
+```
+
+**Tip:** Add this to your `~/.zshrc` to avoid typing it every time:
+
+```bash
+export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
 ```
 
 ### Terminal Output
