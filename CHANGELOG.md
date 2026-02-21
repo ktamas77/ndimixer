@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.6.0
+- **Screencast-based browser capture** — switched from pull-based `page.screenshot()` polling to Chrome's push-based Screencast API for browser overlays
+- Hybrid capture: screencast frames used directly for dynamic content (video), periodic direct CDP screenshot every 2s for correct transparency on static overlays
+- Alpha quality gate filters broken-alpha and white-background screencast frames (Chrome screencast + transparent bg override produces alpha values of 5-15 instead of 255)
+- Initial screenshot with `omit_background` before screencast start ensures correct first frame
+- Direct `CaptureScreenshotParams` CDP command for periodic refresh — avoids `page.screenshot()` side effect of resetting background color override
+- Significantly improved video playback FPS on clip player overlays
+
 ## v0.5.0
 - **Per-layer GPU shader filters** — apply WGSL compute shader effects to individual layers or the final composited output (OBS ShaderFilter-inspired)
 - Standard shader interface with time, dimensions, and up to 16 user-configurable float parameters

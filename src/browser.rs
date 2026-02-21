@@ -1,9 +1,14 @@
 use anyhow::Result;
+use base64::Engine;
 use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
+use chromiumoxide::cdp::browser_protocol::dom::Rgba;
+use chromiumoxide::cdp::browser_protocol::emulation::{
+    SetDefaultBackgroundColorOverrideParams, SetDeviceMetricsOverrideParams,
+};
 use chromiumoxide::cdp::browser_protocol::page::{
-    CaptureScreenshotFormat, EventScreencastFrame, ScreencastFrameAckParams,
-    StartScreencastFormat, StartScreencastParams, StopScreencastParams,
+    CaptureScreenshotFormat, CaptureScreenshotParams, EventScreencastFrame,
+    ScreencastFrameAckParams, StartScreencastFormat, StartScreencastParams,
+    StopScreencastParams,
 };
 use chromiumoxide::page::ScreenshotParams;
 use futures::StreamExt;
@@ -238,26 +243,6 @@ impl BrowserOverlay {
     }
 }
 
-/// Take a screenshot with transparent background and store it.
-async fn take_transparent_screenshot(
-    page: &chromiumoxide::Page,
-    latest_frame: &Arc<Mutex<Option<RgbaImage>>>,
-) {
-    let params = ScreenshotParams::builder()
-        .format(CaptureScreenshotFormat::Png)
-        .omit_background(true)
-        .full_page(false)
-        .build();
-    match page.screenshot(params).await {
-        Ok(png_data) => {
-            if let Ok(img) = image::load_from_memory(&png_data) {
-                *latest_frame.lock().unwrap() = Some(img.to_rgba8());
-            }
-        }
-        Err(e) => tracing::warn!("Screenshot failed: {}", e),
-    }
-}
-
 async fn capture_loop(
     page: chromiumoxide::Page,
     _url: &str,
@@ -267,14 +252,36 @@ async fn capture_loop(
     latest_frame: Arc<Mutex<Option<RgbaImage>>>,
     cancel: CancellationToken,
 ) -> Result<()> {
-    // Initial screenshot to prime the frame
-    take_transparent_screenshot(&page, &latest_frame).await;
+    let b64 = base64::engine::general_purpose::STANDARD;
 
-    // Start screencast as a change-detection mechanism. We don't use the screencast
-    // frame data directly (it has broken alpha with transparent backgrounds). Instead,
-    // when Chrome tells us content changed, we take a screenshot with omit_background.
+    // Initial screenshot with omit_background for correct transparency.
+    // Done BEFORE setting bg override (page.screenshot resets it as side effect).
+    let init_params = ScreenshotParams::builder()
+        .format(CaptureScreenshotFormat::Png)
+        .omit_background(true)
+        .full_page(false)
+        .build();
+    if let Ok(png_data) = page.screenshot(init_params).await {
+        if let Ok(img) = image::load_from_memory(&png_data) {
+            *latest_frame.lock().unwrap() = Some(img.to_rgba8());
+        }
+    }
+
+    // Set transparent background — persists for screencast AND direct CaptureScreenshot.
+    // Unlike page.screenshot(), direct CaptureScreenshot does NOT reset this.
+    let _ = page
+        .execute(SetDefaultBackgroundColorOverrideParams {
+            color: Some(Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: Some(0.0),
+            }),
+        })
+        .await;
+
+    // Start screencast — frames used directly for dynamic content (video)
     let mut stream = page.event_listener::<EventScreencastFrame>().await?;
-
     page.execute(
         StartScreencastParams::builder()
             .format(StartScreencastFormat::Png)
@@ -287,13 +294,10 @@ async fn capture_loop(
 
     tracing::info!("Screencast started ({}x{})", width, height);
 
-    // Rate-limit screenshots to match output frame rate
-    let min_interval = Duration::from_millis(33);
-    let mut last_screenshot = tokio::time::Instant::now();
-
-    // Periodic screenshot for content that loads after initial capture (React apps, etc.)
+    // Periodic direct CaptureScreenshot for correct transparency on static overlays.
+    // Uses CDP directly (not page.screenshot) so bg override is NOT reset.
     let mut refresh_timer = tokio::time::interval(Duration::from_secs(2));
-    refresh_timer.tick().await; // consume first tick
+    refresh_timer.tick().await;
 
     let mut reload_timer = if reload_interval > 0 {
         Some(tokio::time::interval(Duration::from_secs(reload_interval)))
@@ -325,6 +329,11 @@ async fn capture_loop(
                 let _ = page.reload().await;
                 tokio::time::sleep(Duration::from_millis(500)).await;
 
+                // Re-set transparent background
+                let _ = page.execute(SetDefaultBackgroundColorOverrideParams {
+                    color: Some(Rgba { r: 0, g: 0, b: 0, a: Some(0.0) }),
+                }).await;
+
                 stream = page.event_listener::<EventScreencastFrame>().await?;
                 page.execute(
                     StartScreencastParams::builder()
@@ -335,29 +344,54 @@ async fn capture_loop(
                         .build(),
                 ).await?;
 
-                take_transparent_screenshot(&page, &latest_frame).await;
-                last_screenshot = tokio::time::Instant::now();
                 tracing::debug!("Screencast restarted after reload");
             }
 
-            // Periodic refresh screenshot (catches late-loading content)
+            // Periodic direct screenshot for correct transparency on static overlays.
+            // Uses CaptureScreenshot CDP command directly — does NOT reset bg override.
             _ = refresh_timer.tick() => {
-                take_transparent_screenshot(&page, &latest_frame).await;
-                last_screenshot = tokio::time::Instant::now();
+                let params = CaptureScreenshotParams::builder()
+                    .format(CaptureScreenshotFormat::Png)
+                    .build();
+                if let Ok(result) = page.execute(params).await {
+                    let data_str: String = result.data.clone().into();
+                    if let Ok(png_bytes) = b64.decode(&data_str) {
+                        if let Ok(img) = image::load_from_memory(&png_bytes) {
+                            *latest_frame.lock().unwrap() = Some(img.to_rgba8());
+                        }
+                    }
+                }
             }
 
-            // Screencast frame = content changed → take a screenshot
+            // Screencast frame — use directly only if it has real opaque content (video).
+            // Discard frames with broken alpha or white-only backgrounds.
             frame_event = stream.next() => {
                 match frame_event {
                     Some(event) => {
-                        // Ack immediately so Chrome keeps sending change notifications
-                        let _ = page.execute(ScreencastFrameAckParams::new(event.session_id)).await;
+                        let session_id = event.session_id;
 
-                        // Rate-limited screenshot for the actual frame data
-                        if last_screenshot.elapsed() >= min_interval {
-                            take_transparent_screenshot(&page, &latest_frame).await;
-                            last_screenshot = tokio::time::Instant::now();
+                        let data_str: String = event.data.clone().into();
+                        if let Ok(png_bytes) = b64.decode(&data_str) {
+                            if let Ok(img) = image::load_from_memory(&png_bytes) {
+                                let rgba = img.to_rgba8();
+
+                                // Quality gate: only use frame if it has opaque non-white
+                                // content (e.g. video). This filters out:
+                                // - Broken-alpha frames (screencast transparency bug, alpha 5-15)
+                                // - White-bg frames (after screenshot resets bg override)
+                                // - Empty transparent frames
+                                let has_opaque_content = rgba.pixels().any(|p| {
+                                    p.0[3] > 128
+                                        && !(p.0[0] == 255 && p.0[1] == 255 && p.0[2] == 255)
+                                });
+
+                                if has_opaque_content {
+                                    *latest_frame.lock().unwrap() = Some(rgba);
+                                }
+                            }
                         }
+
+                        let _ = page.execute(ScreencastFrameAckParams::new(session_id)).await;
                     }
                     None => {
                         tracing::warn!("Screencast event stream ended");
