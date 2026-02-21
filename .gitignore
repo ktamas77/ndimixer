@@ -20,3 +20,6 @@
 
 # Local config (use config.example.toml as template)
 config.toml
+
+# Monitor binary
+monitor/NDIMixerMonitor

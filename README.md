@@ -297,6 +297,29 @@ curl http://localhost:9100/status
 }
 ```
 
+## Menu Bar Monitor (macOS)
+
+A lightweight macOS menu bar app that shows NDI Mixer status at a glance. Runs independently — works whether ndimixer is running or not.
+
+### Build
+
+```bash
+cd monitor
+bash build.sh
+```
+
+### Run
+
+```bash
+# Default (connects to http://localhost:9100/status)
+./monitor/NDIMixerMonitor &
+
+# Custom endpoint
+./monitor/NDIMixerMonitor --url http://192.168.1.50:9100/status &
+```
+
+A green **NDI** label appears in the menu bar when connected. Click it to see per-channel status (NDI input, browser overlay, output resolution, frame count). When ndimixer is not running, the label turns gray and the dropdown shows "NDI Mixer: not running".
+
 ## Roadmap
 
 - [x] Core NDI receive and send pipeline
@@ -309,6 +332,7 @@ curl http://localhost:9100/status
 - [x] Zero-copy NDI send (BorrowedVideoFrame)
 - [x] Reusable frame buffers (no per-frame allocation)
 - [x] Integer-based compositing (u16 fast path)
+- [x] macOS menu bar monitor (Swift)
 - [ ] Hot-reload config (SIGHUP or file watch)
 - [ ] Audio passthrough from NDI input
 - [ ] Multiple NDI inputs per channel
