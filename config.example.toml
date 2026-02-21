@@ -13,7 +13,7 @@ height = 1080
 frame_rate = 30
 
   [channel.ndi_input]
-  source = "MY-PC (Camera)"
+  source = "Camera"              # Substring match — e.g. matches "MY-PC (Camera)"
   z_index = 0
   opacity = 1.0
 
@@ -35,6 +35,6 @@ frame_rate = 30
 # frame_rate = 30
 #
 #   [channel.ndi_input]
-#   source = "MY-PC (Camera)"
+#   source = "Camera"
 #   z_index = 0
 #   opacity = 1.0

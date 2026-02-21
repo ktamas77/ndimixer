@@ -111,6 +111,7 @@ async fn find_source(ndi: &NDI, source_name: &str, cancel: &CancellationToken) -
         let sources = finder.find_sources(Duration::from_secs(2))?;
         for source in &sources {
             if source.name.contains(source_name) {
+                tracing::info!("NDI input: '{}' matched source '{}'", source_name, source.name);
                 return Ok(source.clone());
             }
         }

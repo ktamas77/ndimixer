@@ -137,9 +137,11 @@ frame_rate = 30
 
 | Field      | Type   | Required | Description                           |
 |------------|--------|----------|---------------------------------------|
-| `source`   | string | yes      | NDI source name to receive            |
+| `source`   | string | yes      | NDI source name (substring match — see below) |
 | `z_index`  | int    | `0`      | Layer draw order (lower = behind)     |
 | `opacity`  | float  | `1.0`    | Layer opacity (0.0–1.0)              |
+
+**NDI source matching:** The `source` field uses substring matching — you don't need to specify the full NDI source name. For example, `"Synesthesia"` will match `"MY-PC (Synesthesia)"`. The full matched source name is logged at startup. Use `--list-sources` to see all available NDI names on your network.
 
 #### `[channel.browser_overlay]` (optional)
 
