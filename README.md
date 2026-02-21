@@ -20,6 +20,8 @@ OBS throttles rendering on non-active scenes/mixes. If you need multiple simulta
 - **Config-file driven** — single TOML config file defines all channels and settings
 - **GPU-accelerated compositing** — optional Metal compute shader backend via wgpu (macOS); falls back to CPU automatically
 - **Headless operation** — runs in the background with terminal status display
+- **Dedicated threading** — each NDI input, render loop, and NDI output runs on its own OS thread for zero-contention frame delivery
+- **Precise frame timing** — workaround for macOS timer coalescing ensures accurate 30fps/60fps output
 - **Status endpoint** — optional HTTP GET endpoint for monitoring (configurable port)
 
 ## Architecture
@@ -273,7 +275,7 @@ export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
 When running, NDI Mixer displays a live status in the terminal:
 
 ```
-NDI Mixer v0.2.0 — 2 channels active (GPU)
+NDI Mixer v0.4.0 — 2 channels active (GPU)
 
   Main         NDI: ✓ MY-PC (Camera)  |  Browser: ✓ loaded  |  Output: Mixer-Main (1920x1080@30)
   Clean Feed   NDI: ✓ MY-PC (Camera)  |  Browser: —         |  Output: Mixer-Clean (1920x1080@30)
@@ -291,7 +293,7 @@ curl http://localhost:9100/status
 
 ```json
 {
-  "version": "0.2.0",
+  "version": "0.4.0",
   "compositor": "gpu",
   "uptime_seconds": 3421,
   "channels": [
@@ -431,12 +433,45 @@ The `KeepAlive` option ensures ndimixer automatically restarts if it crashes.
 - [x] Zero-copy NDI send (BorrowedVideoFrame)
 - [x] Reusable frame buffers (no per-frame allocation)
 - [x] Integer-based compositing (u16 fast path)
-- [x] macOS menu bar monitor (Swift)
+- [x] macOS menu bar monitor (Swift) with live FPS display
+- [x] Multiple browser overlays per channel
+- [x] GPU-accelerated compositing (wgpu Metal compute shaders)
+- [x] Dedicated threads for NDI input, render, and NDI send (no async overhead)
+- [x] Pipelined NDI output (non-blocking async send)
+- [x] Pre-resize NDI input on arrival (eliminates per-frame compositor resize)
+- [x] Precise frame timing (macOS timer coalescing workaround)
 - [ ] Hot-reload config (SIGHUP or file watch)
 - [ ] Audio passthrough from NDI input
 - [ ] Multiple NDI inputs per channel
-- [x] Multiple browser overlays per channel
-- [x] GPU-accelerated compositing (wgpu Metal compute shaders)
+
+## Version History
+
+### v0.4.0
+- **30fps output achieved** — resolved performance bottleneck (was 8-12fps)
+- Moved NDI input to dedicated OS threads with pre-resize to output dimensions
+- Fixed macOS `thread::sleep` timer coalescing causing 50+ms oversleep — replaced with tight sleep loop + spin finish
+- Pipelined NDI output on dedicated send thread (non-blocking `try_send`)
+- Dedicated render threads (moved off tokio async runtime)
+- Zero-copy layer compositing with borrowed image references
+
+### v0.3.0
+- Live FPS display in menu bar monitor
+- Per-overlay browser URL display in menu bar dropdown
+- GPU/CPU compositor mode indicator in status endpoint and menu bar
+
+### v0.2.0
+- GPU-accelerated compositing via wgpu Metal compute shaders
+- Compositor mode (`gpu`/`cpu`) in HTTP status endpoint
+- Terminal status shows GPU/CPU mode
+
+### v0.1.0
+- Initial release
+- Multi-channel NDI mixing with HTML browser overlays
+- CPU compositing with integer alpha blending
+- HTTP status endpoint
+- macOS menu bar monitor (Swift)
+- Multiple browser overlays per channel
+- launchd daemon support
 
 ## License
 

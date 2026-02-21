@@ -97,7 +97,7 @@ impl GpuCompositor {
 
     /// Composite layers onto canvas using GPU compute shaders.
     /// Returns true on success. On failure, caller should fall back to CPU.
-    pub fn composite(&mut self, canvas: &mut RgbaImage, layers: &mut [Layer]) -> bool {
+    pub fn composite(&mut self, canvas: &mut RgbaImage, layers: &mut [Layer<'_>]) -> bool {
         layers.sort_by_key(|l| l.z_index);
 
         let dispatch_x = (self.width + 15) / 16;

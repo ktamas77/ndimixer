@@ -1,14 +1,14 @@
 use image::RgbaImage;
 
-pub struct Layer {
-    pub image: RgbaImage,
+pub struct Layer<'a> {
+    pub image: &'a RgbaImage,
     pub opacity: f32,
     pub z_index: i32,
 }
 
 /// Composite layers onto a caller-owned canvas (reused across frames).
 /// Canvas is cleared to opaque black, then layers are blended by z_index order.
-pub fn composite(canvas: &mut RgbaImage, layers: &mut [Layer]) {
+pub fn composite(canvas: &mut RgbaImage, layers: &mut [Layer<'_>]) {
     let (width, height) = canvas.dimensions();
 
     // Clear canvas to opaque black
@@ -26,7 +26,7 @@ pub fn composite(canvas: &mut RgbaImage, layers: &mut [Layer]) {
     if layers.len() == 1 && layers[0].opacity >= 1.0 {
         let (sw, sh) = layers[0].image.dimensions();
         if sw == width && sh == height {
-            buf.copy_from_slice(layers[0].image.as_ref());
+            buf.copy_from_slice(layers[0].image.as_raw().as_slice());
             return;
         }
     }

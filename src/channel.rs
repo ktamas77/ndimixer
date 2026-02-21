@@ -3,8 +3,7 @@ use chromiumoxide::Browser;
 use grafton_ndi::NDI;
 use image::{ImageBuffer, Rgba, RgbaImage};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio::task::JoinHandle;
+use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::browser::BrowserOverlay;
@@ -45,7 +44,7 @@ pub struct ChannelState {
 
 pub struct Channel {
     pub state: Arc<ChannelState>,
-    _task: JoinHandle<()>,
+    _thread: std::thread::JoinHandle<()>,
 }
 
 impl Channel {
@@ -61,9 +60,9 @@ impl Channel {
         let frame_rate = config.frame_rate;
         let frame_interval = Duration::from_micros(1_000_000 / frame_rate as u64);
 
-        // Start NDI input if configured
+        // Start NDI input if configured (pre-resizes to output dims on its own thread)
         let ndi_input = if let Some(ref ndi_cfg) = config.ndi_input {
-            Some(NdiInput::start(ndi, &ndi_cfg.source, cancel.clone())?)
+            Some(NdiInput::start(ndi, &ndi_cfg.source, width, height, cancel.clone())?)
         } else {
             None
         };
@@ -139,7 +138,6 @@ impl Channel {
         let ndi_latest = ndi_input.as_ref().map(|i| i.latest_frame.clone());
 
         let channel_name = config.name.clone();
-        let cancel_clone = cancel.clone();
 
         // Create per-channel GPU compositor if available
         #[cfg(feature = "gpu")]
@@ -151,97 +149,113 @@ impl Channel {
         #[cfg(not(feature = "gpu"))]
         let _ = gpu_ctx;
 
-        let task = tokio::spawn(async move {
-            tracing::info!(
-                "Channel '{}' started ({}x{}@{}fps)",
-                channel_name,
-                width,
-                height,
-                frame_rate
-            );
+        // Dedicated render thread — no async overhead, precise frame timing
+        let thread = std::thread::Builder::new()
+            .name(format!("render-{}", config.name))
+            .spawn(move || {
+                tracing::info!(
+                    "Channel '{}' started ({}x{}@{}fps)",
+                    channel_name,
+                    width,
+                    height,
+                    frame_rate
+                );
 
-            let mut interval = tokio::time::interval(frame_interval);
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let mut canvas: RgbaImage =
+                    ImageBuffer::from_pixel(width, height, Rgba([0, 0, 0, 255]));
+                let num_browser = browser_layers.len();
+                let mut ndi_output = ndi_output;
 
-            // Reusable canvas — allocated once, cleared each frame by compositor
-            let mut canvas: RgbaImage =
-                ImageBuffer::from_pixel(width, height, Rgba([0, 0, 0, 255]));
-            let num_browser = browser_layers.len();
-            let mut layers = Vec::with_capacity(1 + num_browser);
-            let mut ndi_output = ndi_output;
+                let mut last_ndi_frame: Option<RgbaImage> = None;
+                let mut last_browser_frames: Vec<Option<RgbaImage>> = vec![None; num_browser];
 
-            // Keep last frames so we always have something to composite
-            let mut last_ndi_frame: Option<RgbaImage> = None;
-            let mut last_browser_frames: Vec<Option<RgbaImage>> = vec![None; num_browser];
+                loop {
+                    let frame_start = Instant::now();
 
-            loop {
-                tokio::select! {
-                    _ = cancel_clone.cancelled() => break,
-                    _ = interval.tick() => {
-                        layers.clear();
+                    if cancel.is_cancelled() {
+                        break;
+                    }
 
-                        // Take new NDI frame if available, keep last if not
-                        if let Some(ref frame_lock) = ndi_latest {
-                            if let Some(img) = take_frame(frame_lock) {
-                                last_ndi_frame = Some(img);
-                            }
+                    // Take new frames into buffers
+                    if let Some(ref frame_lock) = ndi_latest {
+                        if let Some(img) = take_frame(frame_lock) {
+                            last_ndi_frame = Some(img);
                         }
-                        if let Some(ref img) = last_ndi_frame {
+                    }
+                    for (i, (ref frame_lock, _, _)) in browser_layers.iter().enumerate() {
+                        if let Some(img) = take_frame(frame_lock) {
+                            last_browser_frames[i] = Some(img);
+                        }
+                    }
+
+                    // Build layer refs (no cloning)
+                    let mut layers: Vec<Layer<'_>> = Vec::with_capacity(1 + num_browser);
+                    if let Some(ref img) = last_ndi_frame {
+                        layers.push(Layer {
+                            image: img,
+                            opacity: ndi_opacity,
+                            z_index: ndi_z,
+                        });
+                    }
+                    for (i, (_, opacity, z_index)) in browser_layers.iter().enumerate() {
+                        if let Some(ref img) = last_browser_frames[i] {
                             layers.push(Layer {
-                                image: img.clone(),
-                                opacity: ndi_opacity,
-                                z_index: ndi_z,
+                                image: img,
+                                opacity: *opacity,
+                                z_index: *z_index,
                             });
                         }
+                    }
 
-                        // Take new browser frames if available, keep last if not
-                        for (i, (ref frame_lock, opacity, z_index)) in browser_layers.iter().enumerate() {
-                            if let Some(img) = take_frame(frame_lock) {
-                                last_browser_frames[i] = Some(img);
-                            }
-                            if let Some(ref img) = last_browser_frames[i] {
-                                layers.push(Layer {
-                                    image: img.clone(),
-                                    opacity: *opacity,
-                                    z_index: *z_index,
-                                });
-                            }
-                        }
-
-                        if layers.is_empty() {
-                            // Canvas is already black from last clear, just send it
-                            let _ = ndi_output.send_frame(&canvas);
-                        } else {
-                            // Use GPU compositor if available, fall back to CPU
-                            #[cfg(feature = "gpu")]
-                            {
-                                let used_gpu = if let Some(ref mut gpu) = gpu_compositor {
-                                    gpu.composite(&mut canvas, &mut layers)
-                                } else {
-                                    false
-                                };
-                                if !used_gpu {
-                                    compositor::composite(&mut canvas, &mut layers);
-                                }
-                            }
-                            #[cfg(not(feature = "gpu"))]
-                            {
+                    if layers.is_empty() {
+                        let _ = ndi_output.send_frame(&canvas);
+                    } else {
+                        #[cfg(feature = "gpu")]
+                        {
+                            let used_gpu = if let Some(ref mut gpu) = gpu_compositor {
+                                gpu.composite(&mut canvas, &mut layers)
+                            } else {
+                                false
+                            };
+                            if !used_gpu {
                                 compositor::composite(&mut canvas, &mut layers);
                             }
-                            let _ = ndi_output.send_frame(&canvas);
                         }
+                        #[cfg(not(feature = "gpu"))]
+                        {
+                            compositor::composite(&mut canvas, &mut layers);
+                        }
+                        let _ = ndi_output.send_frame(&canvas);
+                    }
 
-                        *frames_output.lock().unwrap() += 1;
+                    *frames_output.lock().unwrap() += 1;
+
+                    // Precise frame timing: macOS timer coalescing causes thread::sleep
+                    // to overshoot by 50+ms, so we use small sleep steps + spin finish.
+                    if frame_start.elapsed() < frame_interval {
+                        let target = frame_start + frame_interval;
+                        loop {
+                            let now = Instant::now();
+                            if now >= target {
+                                break;
+                            }
+                            let remaining = target - now;
+                            if remaining > Duration::from_millis(3) {
+                                std::thread::sleep(Duration::from_millis(1));
+                            } else {
+                                std::hint::spin_loop();
+                            }
+                        }
                     }
                 }
-            }
 
-            tracing::info!("Channel '{}' stopped", channel_name);
-        });
+                tracing::info!("Channel '{}' stopped", channel_name);
+            })
+            .expect("Failed to spawn render thread");
 
         Ok(Self {
             state: Arc::new(state),
-            _task: task,
+            _thread: thread,
         })
     }
 }

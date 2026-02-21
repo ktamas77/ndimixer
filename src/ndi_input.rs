@@ -5,18 +5,23 @@ use grafton_ndi::{
 use image::{ImageBuffer, RgbaImage};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub struct NdiInput {
     pub latest_frame: Arc<Mutex<Option<RgbaImage>>>,
     pub connected: Arc<Mutex<bool>>,
     pub frames_received: Arc<Mutex<u64>>,
-    _task: JoinHandle<()>,
+    _thread: std::thread::JoinHandle<()>,
 }
 
 impl NdiInput {
-    pub fn start(ndi: &NDI, source_name: &str, cancel: CancellationToken) -> Result<Self> {
+    pub fn start(
+        ndi: &NDI,
+        source_name: &str,
+        target_width: u32,
+        target_height: u32,
+        cancel: CancellationToken,
+    ) -> Result<Self> {
         let latest_frame: Arc<Mutex<Option<RgbaImage>>> = Arc::new(Mutex::new(None));
         let connected: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
         let frames_received: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
@@ -24,36 +29,41 @@ impl NdiInput {
         let frame_ref = latest_frame.clone();
         let connected_ref = connected.clone();
         let frames_ref = frames_received.clone();
-        let source_name = source_name.to_string();
+        let name = source_name.to_string();
         let ndi = ndi.clone();
 
-        let task = tokio::spawn(async move {
-            if let Err(e) = receive_loop(
-                &ndi,
-                &source_name,
-                frame_ref,
-                connected_ref,
-                frames_ref,
-                cancel,
-            )
-            .await
-            {
-                tracing::error!("NDI input '{}' error: {}", source_name, e);
-            }
-        });
+        let thread = std::thread::Builder::new()
+            .name(format!("ndi-in-{}", source_name))
+            .spawn(move || {
+                if let Err(e) = receive_loop(
+                    &ndi,
+                    &name,
+                    target_width,
+                    target_height,
+                    frame_ref,
+                    connected_ref,
+                    frames_ref,
+                    cancel,
+                ) {
+                    tracing::error!("NDI input '{}' error: {}", name, e);
+                }
+            })
+            .expect("Failed to spawn NDI input thread");
 
         Ok(Self {
             latest_frame,
             connected,
             frames_received,
-            _task: task,
+            _thread: thread,
         })
     }
 }
 
-async fn receive_loop(
+fn receive_loop(
     ndi: &NDI,
     source_name: &str,
+    target_width: u32,
+    target_height: u32,
     latest_frame: Arc<Mutex<Option<RgbaImage>>>,
     connected: Arc<Mutex<bool>>,
     frames_received: Arc<Mutex<u64>>,
@@ -61,8 +71,8 @@ async fn receive_loop(
 ) -> Result<()> {
     tracing::info!("NDI input: searching for source '{}'...", source_name);
 
-    // Find the source
-    let source = find_source(ndi, source_name, &cancel).await?;
+    // Find the source (blocking search on this dedicated thread)
+    let source = find_source(ndi, source_name, &cancel)?;
     tracing::info!("NDI input: found source '{}'", source_name);
 
     // Create receiver with RGBA color format
@@ -85,18 +95,29 @@ async fn receive_loop(
                 let h = frame.height as u32;
 
                 if let Some(img) = ImageBuffer::from_raw(w, h, frame.data.clone()) {
+                    // Resize to target dimensions once on this thread, not per-render-frame
+                    let img = if w != target_width || h != target_height {
+                        image::imageops::resize(
+                            &img,
+                            target_width,
+                            target_height,
+                            image::imageops::FilterType::Nearest,
+                        )
+                    } else {
+                        img
+                    };
                     *latest_frame.lock().unwrap() = Some(img);
                     *frames_received.lock().unwrap() += 1;
                 }
             }
             Ok(None) => {
-                // Timeout, no frame available
-                tokio::task::yield_now().await;
+                // Timeout, no frame available — brief yield
+                std::thread::sleep(Duration::from_millis(1));
             }
             Err(e) => {
                 tracing::warn!("NDI receive error: {}", e);
                 *connected.lock().unwrap() = false;
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                std::thread::sleep(Duration::from_secs(1));
             }
         }
     }
@@ -104,7 +125,7 @@ async fn receive_loop(
     Ok(())
 }
 
-async fn find_source(ndi: &NDI, source_name: &str, cancel: &CancellationToken) -> Result<Source> {
+fn find_source(ndi: &NDI, source_name: &str, cancel: &CancellationToken) -> Result<Source> {
     let finder_opts = FinderOptions::builder().show_local_sources(true).build();
     let finder = Finder::new(ndi, &finder_opts)?;
 
@@ -126,7 +147,7 @@ async fn find_source(ndi: &NDI, source_name: &str, cancel: &CancellationToken) -
         }
 
         tracing::debug!("NDI source '{}' not found, retrying...", source_name);
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
