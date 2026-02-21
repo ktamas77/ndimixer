@@ -299,9 +299,21 @@ curl http://localhost:9100/status
 
 ## Menu Bar Monitor (macOS)
 
-A lightweight macOS menu bar app that shows NDI Mixer status at a glance. Runs independently — works whether ndimixer is running or not.
+A lightweight native macOS menu bar app that shows NDI Mixer status at a glance. Written in Swift, no Xcode required. Runs independently — start it with or without ndimixer running.
+
+![Menu Bar Monitor](monitor/screenshot.png)
+
+### Features
+
+- **Green/gray NDI label** in the menu bar — green when ndimixer is running, gray when offline
+- **Live-updating dropdown** — frame counts, uptime, and connection status update every 2 seconds, even while the menu is open
+- **Per-channel details** — NDI input source and connection state, browser overlay status, output name/resolution, frame count
+- **Independent operation** — launch before or after ndimixer; automatically detects when the mixer starts or stops
+- **Configurable endpoint** — connect to a remote ndimixer instance via `--url`
 
 ### Build
+
+Requires only the macOS SDK (included with Xcode Command Line Tools):
 
 ```bash
 cd monitor
@@ -312,13 +324,15 @@ bash build.sh
 
 ```bash
 # Default (connects to http://localhost:9100/status)
-./monitor/NDIMixerMonitor &
+open ./monitor/NDIMixerMonitor
 
-# Custom endpoint
+# Custom endpoint (e.g. remote machine)
 ./monitor/NDIMixerMonitor --url http://192.168.1.50:9100/status &
 ```
 
-A green **NDI** label appears in the menu bar when connected. Click it to see per-channel status (NDI input, browser overlay, output resolution, frame count). When ndimixer is not running, the label turns gray and the dropdown shows "NDI Mixer: not running".
+### How it works
+
+The monitor polls the ndimixer HTTP status endpoint (`/status`) every 2 seconds. When ndimixer is running, the dropdown shows version, uptime, and per-channel status. When ndimixer is not running or unreachable, the label turns gray and the dropdown shows "NDI Mixer: not running". No configuration file needed.
 
 ## Roadmap
 
