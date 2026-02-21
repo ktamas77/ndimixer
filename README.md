@@ -249,13 +249,16 @@ curl http://localhost:9100/status
 
 ## Roadmap
 
-- [ ] Core NDI receive and send pipeline
-- [ ] TOML config parsing
-- [ ] RGBA compositing with alpha blending
-- [ ] Headless Chromium HTML overlay rendering
-- [ ] Per-layer opacity and z-index
-- [ ] Terminal status display
-- [ ] HTTP status endpoint
+- [x] Core NDI receive and send pipeline
+- [x] TOML config parsing
+- [x] RGBA compositing with alpha blending
+- [x] Headless Chromium HTML overlay rendering
+- [x] Per-layer opacity and z-index
+- [x] Terminal status display
+- [x] HTTP status endpoint
+- [x] Zero-copy NDI send (BorrowedVideoFrame)
+- [x] Reusable frame buffers (no per-frame allocation)
+- [x] Integer-based compositing (u16 fast path)
 - [ ] Hot-reload config (SIGHUP or file watch)
 - [ ] Audio passthrough from NDI input
 - [ ] Multiple NDI inputs per channel

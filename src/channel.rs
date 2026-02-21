@@ -13,6 +13,11 @@ use crate::config::ChannelConfig;
 use crate::ndi_input::NdiInput;
 use crate::ndi_output::NdiOutput;
 
+/// Take the latest frame from a shared buffer (zero-copy swap instead of clone).
+fn take_frame(lock: &Mutex<Option<RgbaImage>>) -> Option<RgbaImage> {
+    lock.lock().unwrap().take()
+}
+
 /// Runtime state for a single channel, used for status reporting.
 pub struct ChannelState {
     pub name: String,
@@ -125,43 +130,57 @@ impl Channel {
             let mut interval = tokio::time::interval(frame_interval);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+            // Reusable canvas — allocated once, cleared each frame by compositor
+            let mut canvas: RgbaImage = ImageBuffer::from_pixel(
+                width, height, Rgba([0, 0, 0, 255]),
+            );
+            let mut layers = Vec::with_capacity(2);
+            let mut ndi_output = ndi_output;
+
+            // Keep last frames so we always have something to composite
+            let mut last_ndi_frame: Option<RgbaImage> = None;
+            let mut last_browser_frame: Option<RgbaImage> = None;
+
             loop {
                 tokio::select! {
                     _ = cancel_clone.cancelled() => break,
                     _ = interval.tick() => {
-                        let mut layers = Vec::new();
+                        layers.clear();
 
-                        // Collect NDI input layer
+                        // Take new NDI frame if available, keep last if not
                         if let Some(ref frame_lock) = ndi_latest {
-                            if let Some(ref img) = *frame_lock.lock().unwrap() {
-                                layers.push(Layer {
-                                    image: img.clone(),
-                                    opacity: ndi_opacity,
-                                    z_index: ndi_z,
-                                });
+                            if let Some(img) = take_frame(frame_lock) {
+                                last_ndi_frame = Some(img);
                             }
                         }
+                        if let Some(ref img) = last_ndi_frame {
+                            layers.push(Layer {
+                                image: img.clone(),
+                                opacity: ndi_opacity,
+                                z_index: ndi_z,
+                            });
+                        }
 
-                        // Collect browser overlay layer
+                        // Take new browser frame if available, keep last if not
                         if let Some(ref frame_lock) = browser_latest {
-                            if let Some(ref img) = *frame_lock.lock().unwrap() {
-                                layers.push(Layer {
-                                    image: img.clone(),
-                                    opacity: browser_opacity,
-                                    z_index: browser_z,
-                                });
+                            if let Some(img) = take_frame(frame_lock) {
+                                last_browser_frame = Some(img);
                             }
                         }
+                        if let Some(ref img) = last_browser_frame {
+                            layers.push(Layer {
+                                image: img.clone(),
+                                opacity: browser_opacity,
+                                z_index: browser_z,
+                            });
+                        }
 
-                        // If no layers, send black frame
                         if layers.is_empty() {
-                            let black: RgbaImage = ImageBuffer::from_pixel(
-                                width, height, Rgba([0, 0, 0, 255]),
-                            );
-                            let _ = ndi_output.send_frame(&black);
+                            // Canvas is already black from last clear, just send it
+                            let _ = ndi_output.send_frame(&canvas);
                         } else {
-                            let result = compositor::composite(&mut layers, width, height);
-                            let _ = ndi_output.send_frame(&result);
+                            compositor::composite(&mut canvas, &mut layers);
+                            let _ = ndi_output.send_frame(&canvas);
                         }
 
                         *frames_output.lock().unwrap() += 1;

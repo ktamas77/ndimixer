@@ -1,10 +1,11 @@
 use anyhow::Result;
-use grafton_ndi::{PixelFormat, SenderOptions, Sender, VideoFrame, NDI};
+use grafton_ndi::{BorrowedVideoFrame, PixelFormat, SenderOptions, Sender, NDI};
 use image::RgbaImage;
 
 pub struct NdiOutput {
     sender: Sender,
     frame_rate: u32,
+    bgra_buf: Vec<u8>,
 }
 
 impl NdiOutput {
@@ -17,41 +18,49 @@ impl NdiOutput {
 
         tracing::info!("NDI output '{}' created ({}x{}@{}fps)", output_name, width, height, frame_rate);
 
+        let buf_size = (width * height * 4) as usize;
+
         Ok(Self {
             sender,
             frame_rate,
+            bgra_buf: vec![0u8; buf_size],
         })
     }
 
-    /// Send an RGBA image as an NDI BGRA video frame.
-    pub fn send_frame(&self, image: &RgbaImage) -> Result<()> {
+    /// Send an RGBA image as an NDI BGRA video frame using a reusable buffer.
+    pub fn send_frame(&mut self, image: &RgbaImage) -> Result<()> {
         let (w, h) = image.dimensions();
+        let src = image.as_raw();
+        let needed = src.len();
 
-        // Convert RGBA to BGRA
-        let mut bgra_data: Vec<u8> = image.as_raw().clone();
-        for pixel in bgra_data.chunks_exact_mut(4) {
-            pixel.swap(0, 2); // Swap R and B
+        // Resize buffer if needed (only on resolution change)
+        if self.bgra_buf.len() != needed {
+            self.bgra_buf.resize(needed, 0);
         }
 
-        let frame = VideoFrame {
-            width: w as i32,
-            height: h as i32,
-            pixel_format: PixelFormat::BGRA,
-            frame_rate_n: self.frame_rate as i32,
-            frame_rate_d: 1,
-            picture_aspect_ratio: 0.0, // auto
-            scan_type: grafton_ndi::ScanType::Progressive,
-            timecode: 0,
-            data: bgra_data,
-            line_stride_or_size: grafton_ndi::LineStrideOrSize::LineStrideBytes(
-                PixelFormat::BGRA.line_stride(w as i32),
-            ),
-            metadata: None,
-            timestamp: 0,
-        };
+        // RGBA → BGRA conversion into reusable buffer
+        let dst = &mut self.bgra_buf;
+        for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+            d[0] = s[2]; // B
+            d[1] = s[1]; // G
+            d[2] = s[0]; // R
+            d[3] = s[3]; // A
+        }
 
-        self.sender.send_video(&frame);
+        let frame = BorrowedVideoFrame::try_from_uncompressed(
+            &self.bgra_buf,
+            w as i32,
+            h as i32,
+            PixelFormat::BGRA,
+            self.frame_rate as i32,
+            1,
+        )?;
+
+        // send_video_async requires &mut self on sender — use sync send via borrowed frame
+        // The sync send_video takes &VideoFrame (owned). Use async+drop for zero-copy.
+        let token = self.sender.send_video_async(&frame);
+        drop(token); // Flushes immediately, releases buffer
+
         Ok(())
     }
-
 }
