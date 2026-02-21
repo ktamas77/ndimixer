@@ -36,7 +36,7 @@ struct BrowserOverlayStatus: Codable {
 struct ChannelMenuItems {
     let nameItem: NSMenuItem
     let ndiItem: NSMenuItem
-    let browserItem: NSMenuItem
+    var browserItems: [NSMenuItem]
     let outputItem: NSMenuItem
     let framesItem: NSMenuItem
 }
@@ -54,8 +54,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var offlineItem: NSMenuItem!
     var channelItems: [ChannelMenuItems] = []
     var quitItem: NSMenuItem!
-    var lastChannelCount: Int = -1
     var isOnline = false
+
+    // Track menu structure: overlay count per channel
+    var lastMenuSignature: [Int] = []
 
     init(url: URL) {
         self.statusURL = url
@@ -111,15 +113,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         channelItems = []
-        lastChannelCount = -1
+        lastMenuSignature = []
     }
 
-    func rebuildChannelItems(count: Int) {
-        // Remove old channel items (between separator and quit)
+    func menuSignature(for channels: [ChannelStatus]) -> [Int] {
+        channels.map { $0.browser_overlays.count }
+    }
+
+    func rebuildChannelItems(channels: [ChannelStatus]) {
+        // Remove old channel items
         for items in channelItems {
             menu.removeItem(items.nameItem)
             menu.removeItem(items.ndiItem)
-            menu.removeItem(items.browserItem)
+            for bi in items.browserItems {
+                menu.removeItem(bi)
+            }
             menu.removeItem(items.outputItem)
             menu.removeItem(items.framesItem)
         }
@@ -129,45 +137,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         channelItems = []
-        let insertIdx = menu.index(of: quitItem)
+        var insertIdx = menu.index(of: quitItem)
 
-        for i in 0..<count {
-            let offset = insertIdx + i * 6 // 5 items + 1 separator per channel
+        for ch in channels {
+            let browserCount = max(ch.browser_overlays.count, 1) // at least 1 line for "—"
 
             let nameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             nameItem.isEnabled = false
-            menu.insertItem(nameItem, at: offset)
+            menu.insertItem(nameItem, at: insertIdx)
+            insertIdx += 1
 
             let ndiItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             ndiItem.isEnabled = false
-            menu.insertItem(ndiItem, at: offset + 1)
+            menu.insertItem(ndiItem, at: insertIdx)
+            insertIdx += 1
 
-            let browserItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-            browserItem.isEnabled = false
-            menu.insertItem(browserItem, at: offset + 2)
+            var browserItems: [NSMenuItem] = []
+            for _ in 0..<browserCount {
+                let bi = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+                bi.isEnabled = false
+                menu.insertItem(bi, at: insertIdx)
+                insertIdx += 1
+                browserItems.append(bi)
+            }
 
             let outputItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             outputItem.isEnabled = false
-            menu.insertItem(outputItem, at: offset + 3)
+            menu.insertItem(outputItem, at: insertIdx)
+            insertIdx += 1
 
             let framesItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             framesItem.isEnabled = false
-            menu.insertItem(framesItem, at: offset + 4)
+            menu.insertItem(framesItem, at: insertIdx)
+            insertIdx += 1
 
             let sep = NSMenuItem.separator()
-            sep.tag = 999 // tag to identify channel separators
-            menu.insertItem(sep, at: offset + 5)
+            sep.tag = 999
+            menu.insertItem(sep, at: insertIdx)
+            insertIdx += 1
 
             channelItems.append(ChannelMenuItems(
                 nameItem: nameItem,
                 ndiItem: ndiItem,
-                browserItem: browserItem,
+                browserItems: browserItems,
                 outputItem: outputItem,
                 framesItem: framesItem
             ))
         }
 
-        lastChannelCount = count
+        lastMenuSignature = menuSignature(for: channels)
     }
 
     func findChannelSeparatorIndex() -> Int? {
@@ -200,13 +218,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateMenu(from status: StatusResponse) {
         isOnline = true
         let comp = status.compositor?.uppercased() ?? "CPU"
-        headerItem.title = "NDI Mixer v\(status.version) — \(formatUptime(status.uptime_seconds)) (\(comp))"
+        headerItem.title = "NDI Mixer v\(status.version) \(comp) — \(formatUptime(status.uptime_seconds))"
         headerItem.isHidden = false
         offlineItem.isHidden = true
 
-        // Rebuild channel structure if count changed
-        if status.channels.count != lastChannelCount {
-            rebuildChannelItems(count: status.channels.count)
+        // Rebuild channel structure if layout changed
+        let sig = menuSignature(for: status.channels)
+        if sig != lastMenuSignature {
+            rebuildChannelItems(channels: status.channels)
         }
 
         // Update each channel's items in place
@@ -228,18 +247,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             if ch.browser_overlays.isEmpty {
-                items.browserItem.title = "  Browser: \u{2014}"
+                if let first = items.browserItems.first {
+                    first.title = "  Browser: \u{2014}"
+                }
             } else {
-                let loadedCount = ch.browser_overlays.filter { $0.loaded }.count
-                let total = ch.browser_overlays.count
-                if loadedCount == total {
-                    if total == 1 {
-                        items.browserItem.title = "  Browser: \u{2713} loaded"
-                    } else {
-                        items.browserItem.title = "  Browser: \u{2713} \(total) loaded"
-                    }
-                } else {
-                    items.browserItem.title = "  Browser: \u{2717} \(loadedCount)/\(total) loaded"
+                for (j, overlay) in ch.browser_overlays.enumerated() {
+                    guard j < items.browserItems.count else { break }
+                    let symbol = overlay.loaded ? "\u{2713}" : "\u{2717}"
+                    items.browserItems[j].title = "  Browser: \(symbol) \(truncateURL(overlay.url))"
                 }
             }
 
@@ -254,9 +269,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         offlineItem.isHidden = false
 
         // Clear channel items
-        if lastChannelCount != 0 {
-            rebuildChannelItems(count: 0)
+        if !lastMenuSignature.isEmpty {
+            rebuildChannelItems(channels: [])
         }
+    }
+
+    func truncateURL(_ urlString: String, maxLength: Int = 40) -> String {
+        var s = urlString
+        if s.hasPrefix("https://") { s = String(s.dropFirst(8)) }
+        else if s.hasPrefix("http://") { s = String(s.dropFirst(7)) }
+        if s.count > maxLength {
+            return String(s.prefix(maxLength - 1)) + "\u{2026}"
+        }
+        return s
     }
 
     func formatUptime(_ seconds: UInt64) -> String {

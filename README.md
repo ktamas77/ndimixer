@@ -331,7 +331,7 @@ A lightweight native macOS menu bar app that shows NDI Mixer status at a glance.
 
 - **Green/gray NDI label** in the menu bar — green when ndimixer is running, gray when offline
 - **Live-updating dropdown** — frame counts, uptime, and connection status update every 2 seconds, even while the menu is open
-- **Per-channel details** — NDI input source and connection state, browser overlay status, output name/resolution, frame count
+- **Per-channel details** — NDI input source and connection state, per-overlay browser URL and load status, output name/resolution, frame count
 - **Compositor mode** — shows GPU or CPU compositing mode in the header
 - **Independent operation** — launch before or after ndimixer; automatically detects when the mixer starts or stops
 - **Configurable endpoint** — connect to a remote ndimixer instance via `--url`
