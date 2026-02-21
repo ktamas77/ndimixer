@@ -13,6 +13,11 @@ use crate::config::ChannelConfig;
 use crate::ndi_input::NdiInput;
 use crate::ndi_output::NdiOutput;
 
+#[cfg(feature = "gpu")]
+pub type GpuCtxParam = Option<Arc<crate::gpu_context::GpuContext>>;
+#[cfg(not(feature = "gpu"))]
+pub type GpuCtxParam = Option<Arc<()>>;
+
 /// Take the latest frame from a shared buffer (zero-copy swap instead of clone).
 fn take_frame(lock: &Mutex<Option<RgbaImage>>) -> Option<RgbaImage> {
     lock.lock().unwrap().take()
@@ -48,6 +53,7 @@ impl Channel {
         config: &ChannelConfig,
         ndi: &NDI,
         browser: Option<&Browser>,
+        gpu_ctx: GpuCtxParam,
         cancel: CancellationToken,
     ) -> Result<Self> {
         let width = config.width;
@@ -135,6 +141,16 @@ impl Channel {
         let channel_name = config.name.clone();
         let cancel_clone = cancel.clone();
 
+        // Create per-channel GPU compositor if available
+        #[cfg(feature = "gpu")]
+        let mut gpu_compositor = gpu_ctx.map(|ctx| {
+            crate::gpu_compositor::GpuCompositor::new(ctx, width, height)
+        });
+
+        // Suppress unused variable warning when gpu feature is off
+        #[cfg(not(feature = "gpu"))]
+        let _ = gpu_ctx;
+
         let task = tokio::spawn(async move {
             tracing::info!(
                 "Channel '{}' started ({}x{}@{}fps)",
@@ -196,7 +212,22 @@ impl Channel {
                             // Canvas is already black from last clear, just send it
                             let _ = ndi_output.send_frame(&canvas);
                         } else {
-                            compositor::composite(&mut canvas, &mut layers);
+                            // Use GPU compositor if available, fall back to CPU
+                            #[cfg(feature = "gpu")]
+                            {
+                                let used_gpu = if let Some(ref mut gpu) = gpu_compositor {
+                                    gpu.composite(&mut canvas, &mut layers)
+                                } else {
+                                    false
+                                };
+                                if !used_gpu {
+                                    compositor::composite(&mut canvas, &mut layers);
+                                }
+                            }
+                            #[cfg(not(feature = "gpu"))]
+                            {
+                                compositor::composite(&mut canvas, &mut layers);
+                            }
                             let _ = ndi_output.send_frame(&canvas);
                         }
 

@@ -2,6 +2,10 @@ mod browser;
 mod channel;
 mod compositor;
 mod config;
+#[cfg(feature = "gpu")]
+mod gpu_compositor;
+#[cfg(feature = "gpu")]
+mod gpu_context;
 mod ndi_input;
 mod ndi_output;
 mod status;
@@ -82,6 +86,12 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    // Initialize GPU compositor if feature enabled
+    #[cfg(feature = "gpu")]
+    let gpu_ctx = gpu_context::GpuContext::try_new();
+    #[cfg(not(feature = "gpu"))]
+    let gpu_ctx: Option<std::sync::Arc<()>> = None;
+
     // Start channels
     let mut channels = Vec::new();
     for ch_config in &config.channel {
@@ -89,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
             ch_config,
             &ndi,
             shared_browser.as_ref().map(|b| b.browser()),
+            gpu_ctx.clone(),
             cancel.clone(),
         )
         .await?;

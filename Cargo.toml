@@ -6,6 +6,10 @@ description = "Headless NDI mixer with HTML overlay support"
 license = "MIT"
 repository = "https://github.com/ktamas77/ndimixer"
 
+[features]
+default = []
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 grafton-ndi = { version = "0.11", features = ["tokio"] }
@@ -21,3 +25,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 futures = "0.3"
 tokio-util = { version = "0.7", features = ["rt"] }
+
+# GPU compositor (optional, macOS Metal backend)
+wgpu = { version = "28", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }

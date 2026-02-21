@@ -18,6 +18,7 @@ OBS throttles rendering on non-active scenes/mixes. If you need multiple simulta
 - **Transparent HTML support** — HTML pages with transparent backgrounds composite correctly (like OBS browser sources)
 - **NDI output per channel** — each channel outputs its own NDI stream
 - **Config-file driven** — single TOML config file defines all channels and settings
+- **GPU-accelerated compositing** — optional Metal compute shader backend via wgpu (macOS); falls back to CPU automatically
 - **Headless operation** — runs in the background with terminal status display
 - **Status endpoint** — optional HTTP GET endpoint for monitoring (configurable port)
 
@@ -172,7 +173,7 @@ The legacy singular `[channel.browser_overlay]` syntax is still supported for ba
 | Language           | Rust                                                                  |
 | NDI send/receive   | [grafton-ndi](https://github.com/GrantSparks/grafton-ndi) (NDI 6 SDK)|
 | HTML rendering     | Headless Chromium via [chromiumoxide](https://github.com/mattsse/chromiumoxide) |
-| Compositing        | Custom RGBA alpha blending (SIMD-optimized)                           |
+| Compositing        | CPU: integer alpha blending / GPU: Metal compute shaders via [wgpu](https://wgpu.rs) |
 | Config             | TOML via [toml](https://crates.io/crates/toml) + [serde](https://serde.rs) |
 | HTTP status        | [axum](https://github.com/tokio-rs/axum) (lightweight)               |
 | Async runtime      | [tokio](https://tokio.rs)                                            |
@@ -236,6 +237,9 @@ brew install --cask google-chrome
 git clone https://github.com/ktamas77/ndimixer.git
 cd ndimixer
 cargo build --release
+
+# With GPU-accelerated compositing (recommended on macOS):
+cargo build --release --features gpu
 ```
 
 ### 5. Configure
@@ -430,7 +434,7 @@ The `KeepAlive` option ensures ndimixer automatically restarts if it crashes.
 - [ ] Audio passthrough from NDI input
 - [ ] Multiple NDI inputs per channel
 - [x] Multiple browser overlays per channel
-- [ ] GPU-accelerated compositing (wgpu)
+- [x] GPU-accelerated compositing (wgpu Metal compute shaders)
 
 ## License
 
